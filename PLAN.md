@@ -24,7 +24,7 @@ The `s3` module provides comprehensive S3-compatible storage operations for Star
 
 ## Core Design Principles
 
-1. **Function-based API**: Uses `new_client()` function instead of class constructors
+1. **Function-based API**: Uses `connect()` function instead of class constructors
 2. **S3-compatible First**: Works seamlessly with any S3-compatible service
 3. **Security by Default**: Secure credential handling with base package integration
 4. **High Performance**: Optimized for large files with streaming and concurrent operations
@@ -35,7 +35,7 @@ The `s3` module provides comprehensive S3-compatible storage operations for Star
 
 ### Key Limitations Addressed
 
-- ❌ **No Classes**: Use `new_client()` function returning object with methods
+- ❌ **No Classes**: Use `connect()` function returning object with methods
 - ❌ **No f-strings**: Use `.format()` method for string formatting
 - ❌ **No try/except**: Use `fail()` for error handling and None checks
 - ❌ **No `is`/`is not`**: Use `== None` and `!= None`
@@ -90,48 +90,61 @@ The `s3` module provides comprehensive S3-compatible storage operations for Star
 ### Core Module Functions
 
 ```python
-# Client creation
-new_client(access_key_id=None, secret_access_key=None, region="us-east-1", **config) -> S3Client
-
-# Response builders (for advanced use cases)
-upload_options(content_type=None, metadata={}, tags={}) -> Options
-multipart_options(part_size=5*1024*1024, parallel_uploads=3) -> Options
+# Primary connection function
+connect(
+    service_type="auto",        # "aws_s3", "minio", "digitalocean", "azure_blob", "auto"
+    endpoint=None,              # Custom endpoint URL for S3-compatible services
+    aws_region="us-east-1",     # AWS region
+    aws_access_key=None,        # AWS access key ID
+    aws_secret_key=None,        # AWS secret access key
+    aws_session_token=None,     # AWS session token (optional)
+    force_path_style=False,     # Use path-style addressing (required for MinIO)
+    use_ssl=True,               # Enable/disable SSL
+    timeout=30,                 # Connection timeout in seconds
+    max_retries=3,              # Maximum retry attempts
+    **config                    # Additional configuration options
+) -> S3Client
 
 # Utility functions
 parse_s3_url(url) -> {"bucket": str, "key": str}
 generate_s3_url(bucket, key, region="us-east-1") -> str
 validate_bucket_name(name) -> bool
 validate_object_key(key) -> bool
+get_supported_services() -> list    # Returns supported service types
+get_client_info(client) -> dict     # Returns client connection details
 ```
 
 ### Client Creation Examples
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 
 # Create a client with AWS credentials
-s3 = new_client(
-    access_key_id="YOUR_ACCESS_KEY",
-    secret_access_key="YOUR_SECRET_KEY",
-    region="us-east-1"
+s3 = connect(
+    service_type="aws_s3",
+    aws_access_key="YOUR_ACCESS_KEY",
+    aws_secret_key="YOUR_SECRET_KEY",
+    aws_region="us-east-1"
 )
 
 # Or use environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-s3 = new_client()
+s3 = connect()  # Auto-detects AWS S3 with environment variables
 
 # For S3-compatible services (e.g., MinIO)
-s3 = new_client(
+s3 = connect(
+    service_type="minio",
     endpoint="http://localhost:9000",
-    access_key_id="minioadmin",
-    secret_access_key="minioadmin",
-    region="us-east-1",
+    aws_access_key="minioadmin",
+    aws_secret_key="minioadmin",
+    aws_region="us-east-1",
     force_path_style=True,  # Required for MinIO
     use_ssl=False
 )
 
 # With advanced configuration
-s3 = new_client(
-    region="eu-west-1",
+s3 = connect(
+    service_type="aws_s3",
+    aws_region="eu-west-1",
     timeout=60,
     max_retries=5,
     enable_compression=True
@@ -144,13 +157,14 @@ The S3 module supports various configuration options:
 
 | Option | Type | Description | Default |
 |--------|------|-------------|---------|
-| `access_key_id` | string | AWS access key ID | Environment: `AWS_ACCESS_KEY_ID` |
-| `secret_access_key` | string | AWS secret access key | Environment: `AWS_SECRET_ACCESS_KEY` |
-| `region` | string | AWS region | `us-east-1` |
-| `endpoint` | string | Custom endpoint for S3-compatible services | AWS S3 endpoint |
+| `service_type` | string | Service type ("aws_s3", "minio", "digitalocean", "azure_blob", "auto") | `auto` |
+| `aws_access_key` | string | AWS access key ID | Environment: `AWS_ACCESS_KEY_ID` |
+| `aws_secret_key` | string | AWS secret access key | Environment: `AWS_SECRET_ACCESS_KEY` |
+| `aws_session_token` | string | AWS session token | Environment: `AWS_SESSION_TOKEN` |
+| `aws_region` | string | AWS region | Environment: `AWS_DEFAULT_REGION` or `us-east-1` |
+| `endpoint` | string | Custom endpoint for S3-compatible services | Auto-detected based on service_type |
 | `force_path_style` | bool | Use path-style addressing (required for MinIO) | `false` |
 | `use_ssl` | bool | Enable SSL/TLS | `true` |
-| `session_token` | string | Temporary session token | None |
 | `timeout` | int | Request timeout in seconds | `30` |
 | `max_retries` | int | Maximum retry attempts | `3` |
 | `part_size` | int | Multi-part upload part size in bytes | `5242880` (5MB) |
@@ -380,10 +394,10 @@ for upload in uploads:
 ### 1. Basic File Management
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 
 def main():
-    s3 = new_client(region="us-east-1")
+    s3 = connect(aws_region="us-east-1")
     
     bucket_name = "my-files-bucket"
     
@@ -427,14 +441,14 @@ main()
 ### 2. Website Static File Deployment
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 load("file", "exists", "read")
 load("path", "join", "ext")
 
 def deploy_website(bucket_name, local_dir):
     """Deploy a static website to S3"""
     
-    s3 = new_client()
+    s3 = connect()
     
     # Content type mapping
     content_types = {
@@ -513,7 +527,7 @@ main()
 ### 3. Backup System
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 load("time")
 load("file", "read", "exists")
 load("path", "join")
@@ -521,7 +535,7 @@ load("path", "join")
 def backup_files(bucket_name, files_to_backup):
     """Backup files to S3 with timestamp and metadata"""
     
-    s3 = new_client()
+    s3 = connect()
     timestamp = time.now().format("2006-01-02-15-04-05")
     
     # Ensure backup bucket exists
@@ -563,7 +577,7 @@ def backup_files(bucket_name, files_to_backup):
 def list_backups(bucket_name, days=30):
     """List recent backups"""
     
-    s3 = new_client()
+    s3 = connect()
     
     # List backup objects
     result = s3.list_objects(bucket_name, prefix="backups/", max_keys=1000)
@@ -605,14 +619,14 @@ main()
 ### 4. Data Processing Pipeline
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 load("json")
 load("time")
 
 def process_data_pipeline():
     """Process data files from one S3 bucket to another"""
     
-    s3 = new_client()
+    s3 = connect()
     
     source_bucket = "raw-data"
     processed_bucket = "processed-data"
@@ -682,33 +696,36 @@ main()
 ### 5. Multi-Service Configuration
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 
 def multi_service_example():
     """Example of working with multiple S3-compatible services"""
     
     # AWS S3 client
-    aws_s3 = new_client(
-        region="us-west-2",
+    aws_s3 = connect(
+        service_type="aws_s3",
+        aws_region="us-west-2",
         # Uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from environment
     )
     
     # MinIO client
-    minio_s3 = new_client(
+    minio_s3 = connect(
+        service_type="minio",
         endpoint="http://localhost:9000",
-        access_key_id="minioadmin",
-        secret_access_key="minioadmin",
-        region="us-east-1",
+        aws_access_key="minioadmin",
+        aws_secret_key="minioadmin",
+        aws_region="us-east-1",
         force_path_style=True,
         use_ssl=False
     )
     
     # DigitalOcean Spaces client
-    do_s3 = new_client(
+    do_s3 = connect(
+        service_type="digitalocean",
         endpoint="https://nyc3.digitaloceanspaces.com",
-        access_key_id="YOUR_DO_SPACES_KEY",
-        secret_access_key="YOUR_DO_SPACES_SECRET",
-        region="nyc3"
+        aws_access_key="YOUR_DO_SPACES_KEY",
+        aws_secret_key="YOUR_DO_SPACES_SECRET",
+        aws_region="nyc3"
     )
     
     # Test each service
@@ -759,12 +776,12 @@ main()
 ### 6. Error Handling and Validation
 
 ```python
-load("s3", "new_client", "validate_bucket_name", "validate_object_key")
+load("s3", "connect", "validate_bucket_name", "validate_object_key")
 
 def safe_s3_operations():
     """Example of robust S3 operations with error handling"""
     
-    s3 = new_client()
+    s3 = connect()
     
     def safe_upload(bucket, key, content):
         """Safely upload with validation and error handling"""
@@ -968,26 +985,27 @@ type ListObjectsResult struct {
 ### Environment Variable Configuration
 
 ```bash
-# Authentication
-export S3_ACCESS_KEY_ID="YOUR_ACCESS_KEY"
-export S3_SECRET_ACCESS_KEY="YOUR_SECRET_KEY"
-export S3_SESSION_TOKEN="YOUR_SESSION_TOKEN"
+# Primary service configuration
+export S3_SERVICE_TYPE="aws_s3"                    # Service type
+export S3_ENDPOINT="https://s3.amazonaws.com"      # Custom endpoint
+export S3_TIMEOUT="30"                             # Connection timeout
+export S3_MAX_RETRIES="3"                          # Maximum retry attempts
 
-# Service configuration
-export S3_REGION="us-east-1"
-export S3_ENDPOINT="https://s3.amazonaws.com"
-export S3_FORCE_PATH_STYLE="false"
-export S3_USE_SSL="true"
+# AWS Authentication (compatible with AWS CLI/SDK)
+export AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY"         # AWS access key ID
+export AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY"     # AWS secret access key
+export AWS_SESSION_TOKEN="YOUR_SESSION_TOKEN"      # AWS session token (optional)
+export AWS_DEFAULT_REGION="us-east-1"              # AWS region
 
-# Performance settings
-export S3_TIMEOUT="30"
-export S3_MAX_RETRIES="3"
-export S3_PART_SIZE="5242880"      # 5MB
-export S3_CONCURRENCY="3"
+# S3-specific configuration
+export S3_FORCE_PATH_STYLE="false"                 # Path-style addressing
+export S3_USE_SSL="true"                           # Enable SSL/TLS
+export S3_PART_SIZE="5242880"                      # Multipart upload part size (5MB)
+export S3_CONCURRENCY="3"                          # Concurrent operations
 
-# Debug settings
-export S3_ENABLE_LOGGING="false"
-export S3_USER_AGENT="starlark-s3/1.0"
+# Debug and monitoring
+export S3_ENABLE_LOGGING="false"                   # Enable request logging
+export S3_USER_AGENT="starlark-s3/1.0"            # Custom user agent
 ```
 
 ## Development Plan
@@ -1008,9 +1026,9 @@ export S3_USER_AGENT="starlark-s3/1.0"
 #### Success Criteria
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 
-s3 = new_client(region="us-east-1")
+s3 = connect(aws_region="us-east-1")
 s3.create_bucket("test-bucket")
 s3.put_object("test-bucket", "hello.txt", "Hello, World!")
 content = s3.get_object("test-bucket", "hello.txt")
@@ -1076,16 +1094,18 @@ s3.set_object_tags("bucket", "file.txt", {"env": "prod"})
 
 ```python
 # MinIO support
-minio = new_client(
+minio = connect(
+    service_type="minio",
     endpoint="http://localhost:9000",
     force_path_style=True,
     use_ssl=False
 )
 
 # DigitalOcean Spaces support
-do_spaces = new_client(
+do_spaces = connect(
+    service_type="digitalocean",
     endpoint="https://nyc3.digitaloceanspaces.com",
-    region="nyc3"
+    aws_region="nyc3"
 )
 ```
 
@@ -1279,13 +1299,13 @@ do_spaces = new_client(
 
 | Parameter | AWS S3 | MinIO | DigitalOcean | Azure Blob | Universal | Notes |
 |-----------|--------|-------|--------------|------------|-----------|-------|
-| `access_key_id` | ✅ | ✅ | ✅ | ✅ | ✅ | Required for authentication |
-| `secret_access_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Required for authentication |
-| `region` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | May be ignored by some services |
+| `aws_access_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Required for authentication |
+| `aws_secret_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Required for authentication |
+| `aws_region` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | May be ignored by some services |
 | `endpoint` | ✅ | ✅ | ✅ | ✅ | ✅ | Custom endpoint support |
 | `force_path_style` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | Required for MinIO |
 | `use_ssl` | ✅ | ✅ | ✅ | ✅ | ✅ | SSL/TLS configuration |
-| `session_token` | ✅ | ❌ | ❌ | ⚠️ | ❌ | AWS-specific feature |
+| `aws_session_token` | ✅ | ❌ | ❌ | ⚠️ | ❌ | AWS-specific feature |
 | `timeout` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal timeout support |
 | `max_retries` | ✅ | ✅ | ✅ | ✅ | ✅ | Retry configuration |
 | `part_size` | ✅ | ✅ | ✅ | ✅ | ✅ | Multipart upload tuning |
@@ -1296,9 +1316,10 @@ do_spaces = new_client(
 #### AWS S3 (Reference Implementation)
 
 ```python
-s3 = new_client(
-    region="us-east-1",
-    # Uses environment variables by default
+s3 = connect(
+    service_type="aws_s3",
+    aws_region="us-east-1",
+    # Uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from environment
     timeout=30,
     max_retries=3
 )
@@ -1307,11 +1328,12 @@ s3 = new_client(
 #### MinIO (Self-hosted)
 
 ```python
-s3 = new_client(
+s3 = connect(
+    service_type="minio",
     endpoint="http://localhost:9000",
-    access_key_id="minioadmin",
-    secret_access_key="minioadmin",
-    region="us-east-1",
+    aws_access_key="minioadmin",
+    aws_secret_key="minioadmin",
+    aws_region="us-east-1",
     force_path_style=True,  # Required for MinIO
     use_ssl=False
 )
@@ -1320,22 +1342,24 @@ s3 = new_client(
 #### DigitalOcean Spaces
 
 ```python
-s3 = new_client(
+s3 = connect(
+    service_type="digitalocean",
     endpoint="https://nyc3.digitaloceanspaces.com",
-    access_key_id="YOUR_SPACES_KEY",
-    secret_access_key="YOUR_SPACES_SECRET",
-    region="nyc3"
+    aws_access_key="YOUR_SPACES_KEY",
+    aws_secret_key="YOUR_SPACES_SECRET",
+    aws_region="nyc3"
 )
 ```
 
 #### Azure Blob Storage (S3-compatible API)
 
 ```python
-s3 = new_client(
+s3 = connect(
+    service_type="azure_blob",
     endpoint="https://myaccount.blob.core.windows.net",
-    access_key_id="myaccount",
-    secret_access_key="ACCESS_KEY",
-    region="eastus",  # May be ignored
+    aws_access_key="myaccount",
+    aws_secret_key="ACCESS_KEY",
+    aws_region="eastus",  # May be ignored
     force_path_style=True  # Often required
 )
 ```
@@ -1343,11 +1367,12 @@ s3 = new_client(
 #### Backblaze B2
 
 ```python
-s3 = new_client(
+s3 = connect(
+    service_type="backblaze_b2",
     endpoint="https://s3.us-west-004.backblazeb2.com",
-    access_key_id="YOUR_APPLICATION_KEY_ID",
-    secret_access_key="YOUR_APPLICATION_KEY",
-    region="us-west-004"
+    aws_access_key="YOUR_APPLICATION_KEY_ID",
+    aws_secret_key="YOUR_APPLICATION_KEY",
+    aws_region="us-west-004"
 )
 ```
 
@@ -1528,13 +1553,13 @@ go get github.com/1set/starpkg/s3
 ## Quick Start Example
 
 ```python
-load("s3", "new_client")
+load("s3", "connect")
 
 # Create a client
-s3 = new_client(
-    access_key_id="YOUR_ACCESS_KEY",
-    secret_access_key="YOUR_SECRET_KEY",
-    region="us-east-1"
+s3 = connect(
+    aws_access_key="YOUR_ACCESS_KEY",
+    aws_secret_key="YOUR_SECRET_KEY",
+    aws_region="us-east-1"
 )
 
 # Upload an object
@@ -1558,28 +1583,28 @@ for obj in objects["contents"]:
 
 ```python
 # Let the client read from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-s3 = new_client()
+s3 = connect()
 ```
 
 #### Avoid Hardcoding Credentials
 
 ```python
 # ❌ Bad: Hardcoded credentials
-s3 = new_client(
-    access_key_id="AKIAIOSFODNN7EXAMPLE",
-    secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+s3 = connect(
+    aws_access_key="AKIAIOSFODNN7EXAMPLE",
+    aws_secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 )
 
 # ✅ Good: Environment-based credentials
-s3 = new_client()  # Uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+s3 = connect()  # Uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
 ```
 
 #### Use Least Privilege Access
 
 ```python
 # Create service-specific clients with limited permissions
-backup_s3 = new_client(region="us-east-1")  # Backup service account
-web_s3 = new_client(region="us-west-2")     # Web assets account
+backup_s3 = connect(aws_region="us-east-1")  # Backup service account
+web_s3 = connect(aws_region="us-west-2")     # Web assets account
 ```
 
 ### 2. **Reliability Patterns**
@@ -1662,14 +1687,14 @@ def smart_upload(s3, bucket, key, content):
 
 ```python
 # For large file operations
-large_file_s3 = new_client(
+large_file_s3 = connect(
     timeout=300,      # 5 minutes
     max_retries=5,    # More retries for large files
     part_size=10*1024*1024  # 10MB parts for faster uploads
 )
 
 # For quick metadata operations
-quick_s3 = new_client(
+quick_s3 = connect(
     timeout=10,       # 10 seconds
     max_retries=2     # Fewer retries for quick operations
 )
@@ -1681,18 +1706,19 @@ quick_s3 = new_client(
 
 ```python
 # Use appropriate regions for performance
-us_east_s3 = new_client(region="us-east-1")  # Lowest latency for US East
-eu_west_s3 = new_client(region="eu-west-1")  # EU operations
+us_east_s3 = connect(aws_region="us-east-1")  # Lowest latency for US East
+eu_west_s3 = connect(aws_region="eu-west-1")  # EU operations
 
 # Enable request compression for text content
-s3 = new_client(enable_compression=True)
+s3 = connect(enable_compression=True)
 ```
 
 #### MinIO Optimizations
 
 ```python
 # MinIO requires path-style addressing
-minio_s3 = new_client(
+minio_s3 = connect(
+    service_type="minio",
     endpoint="http://localhost:9000",
     force_path_style=True,  # Required for MinIO
     use_ssl=False,          # For local development
@@ -1704,9 +1730,10 @@ minio_s3 = new_client(
 
 ```python
 # Use CDN-friendly configurations
-do_s3 = new_client(
+do_s3 = connect(
+    service_type="digitalocean",
     endpoint="https://nyc3.digitaloceanspaces.com",
-    region="nyc3"
+    aws_region="nyc3"
 )
 
 # Set cache headers for CDN
@@ -1834,10 +1861,11 @@ def sync_directory(s3, bucket, local_dir, s3_prefix):
 ```python
 def setup_test_environment():
     """Set up MinIO for testing"""
-    return new_client(
+    return connect(
+        service_type="minio",
         endpoint="http://localhost:9000",
-        access_key_id="testkey",
-        secret_access_key="testsecret",
+        aws_access_key="testkey",
+        aws_secret_key="testsecret",
         force_path_style=True,
         use_ssl=False
     )
