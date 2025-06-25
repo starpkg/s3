@@ -1183,20 +1183,226 @@ do_spaces = new_client(
 - Conditional requests with ETags
 - Intelligent retry with exponential backoff
 
-## Compatibility Matrix
+## Service Compatibility Analysis
 
-| Service | Supported | Configuration | Notes |
-|---------|-----------|---------------|-------|
-| **AWS S3** | ✅ Full | Default | Complete S3 API support |
-| **MinIO** | ✅ Full | `force_path_style=True` | Local/private cloud storage |
-| **DigitalOcean Spaces** | ✅ Full | Custom endpoint | CDN integration available |
-| **Backblaze B2** | ✅ Core | S3-compatible API | Some features limited |
-| **Wasabi** | ✅ Full | Custom endpoint | Hot storage optimized |
-| **Google Cloud Storage** | ✅ Core | Interoperability API | XML API compatibility |
-| **IBM Cloud Object Storage** | ✅ Core | Custom endpoint | Enterprise features |
-| **Alibaba Cloud OSS** | ✅ Core | Custom endpoint | Regional availability |
+### Overview Matrix
+
+| Service | Support Level | Configuration Required | Primary Use Case |
+|---------|---------------|----------------------|------------------|
+| **AWS S3** | ✅ Complete | Default settings | Production cloud storage |
+| **MinIO** | ✅ Complete | `force_path_style=True` | Self-hosted/on-premises |
+| **DigitalOcean Spaces** | ✅ Complete | Custom endpoint | Developer-friendly hosting |
+| **Azure Blob Storage** | ⚠️ Limited | S3-compatible API | Microsoft ecosystem |
+| **Backblaze B2** | ⚠️ Limited | S3-compatible API | Cost-effective backup |
+| **Wasabi** | ✅ Complete | Custom endpoint | Hot storage optimization |
+| **Google Cloud Storage** | ⚠️ Limited | XML API mode | Google Cloud integration |
+| **IBM Cloud Object Storage** | ✅ Complete | Custom endpoint | Enterprise environments |
+| **Alibaba Cloud OSS** | ⚠️ Limited | Custom endpoint | Asia-Pacific regions |
+
+**Legend:**
+
+- ✅ **Complete**: Full API compatibility, all features supported
+- ⚠️ **Limited**: Core features work, some advanced features unavailable
+- ❌ **Unsupported**: Not compatible with S3 API
+
+### Authentication Methods Comparison
+
+| Service | Access Keys | IAM Roles | STS Tokens | Environment Variables | Notes |
+|---------|-------------|-----------|------------|----------------------|-------|
+| **AWS S3** | ✅ | ✅ | ✅ | ✅ | Full credential chain support |
+| **MinIO** | ✅ | ❌ | ❌ | ✅ | Simple access key authentication |
+| **DigitalOcean Spaces** | ✅ | ❌ | ❌ | ✅ | Spaces key and secret |
+| **Azure Blob Storage** | ✅ | ⚠️ | ⚠️ | ✅ | Limited S3 API auth support |
+| **Backblaze B2** | ✅ | ❌ | ❌ | ✅ | Application key authentication |
+| **Wasabi** | ✅ | ❌ | ❌ | ✅ | Root/sub-account access keys |
+| **Google Cloud Storage** | ✅ | ⚠️ | ❌ | ✅ | HMAC keys for S3 compatibility |
+| **IBM Cloud Object Storage** | ✅ | ⚠️ | ❌ | ✅ | Service credentials |
+| **Alibaba Cloud OSS** | ✅ | ⚠️ | ⚠️ | ✅ | AccessKey ID/Secret |
+
+### Bucket Operations Support
+
+| Operation | AWS S3 | MinIO | DigitalOcean | Azure Blob | Backblaze B2 | Notes |
+|-----------|--------|-------|--------------|------------|---------------|-------|
+| `create_bucket()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `delete_bucket()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `list_buckets()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `bucket_exists()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `get_bucket_location()` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | May return generic values |
+| `set_bucket_versioning()` | ✅ | ✅ | ❌ | ⚠️ | ❌ | Limited availability |
+| `get_bucket_versioning()` | ✅ | ✅ | ❌ | ⚠️ | ❌ | Limited availability |
+| Regional bucket creation | ✅ | ✅ | ✅ | ⚠️ | ❌ | Some services auto-select |
+
+### Object Operations Support
+
+| Operation | AWS S3 | MinIO | DigitalOcean | Azure Blob | Backblaze B2 | Notes |
+|-----------|--------|-------|--------------|------------|---------------|-------|
+| `put_object()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `get_object()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `delete_object()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `delete_objects()` (batch) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | Limited batch support |
+| `copy_object()` | ✅ | ✅ | ✅ | ✅ | ⚠️ | Some restrictions apply |
+| `list_objects()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `get_object_info()` (HEAD) | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `object_exists()` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| Range requests | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+
+### Advanced Features Support
+
+| Feature | AWS S3 | MinIO | DigitalOcean | Azure Blob | Backblaze B2 | Implementation Notes |
+|---------|--------|-------|--------------|------------|---------------|---------------------|
+| **Multipart Upload** | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `create_multipart_upload()` | ✅ | ✅ | ✅ | ✅ | ✅ | Standard implementation |
+| `upload_part()` | ✅ | ✅ | ✅ | ✅ | ✅ | Standard implementation |
+| `complete_multipart_upload()` | ✅ | ✅ | ✅ | ✅ | ✅ | Standard implementation |
+| `abort_multipart_upload()` | ✅ | ✅ | ✅ | ✅ | ✅ | Standard implementation |
+| `list_multipart_uploads()` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | Limited support |
+| **Pre-signed URLs** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | AWS signature compatibility |
+| `presign_url()` (GET) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | May use different signing |
+| `presign_put_url()` (PUT) | ✅ | ✅ | ✅ | ❌ | ⚠️ | Limited PUT support |
+| `presign_post()` (POST) | ✅ | ✅ | ❌ | ❌ | ❌ | AWS-specific feature |
+
+### Metadata and Tagging Support
+
+| Feature | AWS S3 | MinIO | DigitalOcean | Azure Blob | Backblaze B2 | Limitations |
+|---------|--------|-------|--------------|------------|---------------|-------------|
+| **Custom Metadata** | ✅ | ✅ | ✅ | ✅ | ✅ | Universal support |
+| `get_object_metadata()` | ✅ | ✅ | ✅ | ✅ | ✅ | Header-based metadata |
+| `set_object_metadata()` | ✅ | ✅ | ✅ | ✅ | ⚠️ | Copy operation required |
+| Metadata size limits | 2KB | 2KB | 2KB | 8KB | 2KB | Varies by service |
+| **Object Tagging** | ✅ | ✅ | ❌ | ⚠️ | ❌ | Limited availability |
+| `get_object_tags()` | ✅ | ✅ | ❌ | ⚠️ | ❌ | AWS/MinIO primarily |
+| `set_object_tags()` | ✅ | ✅ | ❌ | ⚠️ | ❌ | AWS/MinIO primarily |
+| `delete_object_tags()` | ✅ | ✅ | ❌ | ⚠️ | ❌ | AWS/MinIO primarily |
+| Tag count limits | 10 | 10 | N/A | Varies | N/A | Service-specific |
+
+### Configuration Parameters Support
+
+| Parameter | AWS S3 | MinIO | DigitalOcean | Azure Blob | Universal | Notes |
+|-----------|--------|-------|--------------|------------|-----------|-------|
+| `access_key_id` | ✅ | ✅ | ✅ | ✅ | ✅ | Required for authentication |
+| `secret_access_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Required for authentication |
+| `region` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | May be ignored by some services |
+| `endpoint` | ✅ | ✅ | ✅ | ✅ | ✅ | Custom endpoint support |
+| `force_path_style` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | Required for MinIO |
+| `use_ssl` | ✅ | ✅ | ✅ | ✅ | ✅ | SSL/TLS configuration |
+| `session_token` | ✅ | ❌ | ❌ | ⚠️ | ❌ | AWS-specific feature |
+| `timeout` | ✅ | ✅ | ✅ | ✅ | ✅ | Universal timeout support |
+| `max_retries` | ✅ | ✅ | ✅ | ✅ | ✅ | Retry configuration |
+| `part_size` | ✅ | ✅ | ✅ | ✅ | ✅ | Multipart upload tuning |
+| `concurrency` | ✅ | ✅ | ✅ | ✅ | ✅ | Concurrent operations |
+
+### Service-Specific Configuration Examples
+
+#### AWS S3 (Reference Implementation)
+
+```python
+s3 = new_client(
+    region="us-east-1",
+    # Uses environment variables by default
+    timeout=30,
+    max_retries=3
+)
+```
+
+#### MinIO (Self-hosted)
+
+```python
+s3 = new_client(
+    endpoint="http://localhost:9000",
+    access_key_id="minioadmin",
+    secret_access_key="minioadmin",
+    region="us-east-1",
+    force_path_style=True,  # Required for MinIO
+    use_ssl=False
+)
+```
+
+#### DigitalOcean Spaces
+
+```python
+s3 = new_client(
+    endpoint="https://nyc3.digitaloceanspaces.com",
+    access_key_id="YOUR_SPACES_KEY",
+    secret_access_key="YOUR_SPACES_SECRET",
+    region="nyc3"
+)
+```
+
+#### Azure Blob Storage (S3-compatible API)
+
+```python
+s3 = new_client(
+    endpoint="https://myaccount.blob.core.windows.net",
+    access_key_id="myaccount",
+    secret_access_key="ACCESS_KEY",
+    region="eastus",  # May be ignored
+    force_path_style=True  # Often required
+)
+```
+
+#### Backblaze B2
+
+```python
+s3 = new_client(
+    endpoint="https://s3.us-west-004.backblazeb2.com",
+    access_key_id="YOUR_APPLICATION_KEY_ID",
+    secret_access_key="YOUR_APPLICATION_KEY",
+    region="us-west-004"
+)
+```
+
+### Feature Compatibility Notes
+
+#### **Universal Features** (Work with all services)
+
+- Basic CRUD operations (create, read, update, delete)
+- Bucket management (create, delete, list, exists)
+- Object metadata (standard HTTP headers)
+- Multipart uploads for large files
+- SSL/TLS encryption in transit
+
+#### **AWS-Specific Features** (Limited compatibility)
+
+- Object tagging (only AWS S3 and MinIO)
+- STS token authentication
+- Advanced IAM integration
+- Server-side encryption with KMS
+- Bucket policies and ACLs
+
+#### **Service-Specific Limitations**
+
+**Azure Blob Storage:**
+
+- Limited S3 API compatibility
+- Different authentication mechanisms preferred
+- Some advanced features not available via S3 API
+
+**Backblaze B2:**
+
+- No object tagging support
+- Limited pre-signed URL capabilities
+- Different pricing model affects usage patterns
+
+**Google Cloud Storage:**
+
+- Requires HMAC keys for S3 compatibility
+- Some metadata handling differences
+- Different permission model
+
+### Recommended Service Selection
+
+| Use Case | Recommended Service | Alternative | Reason |
+|----------|-------------------|-------------|--------|
+| **Production AWS** | AWS S3 | None | Full feature compatibility |
+| **Development/Testing** | MinIO | DigitalOcean Spaces | Local development, full features |
+| **Cost-Sensitive Backup** | Backblaze B2 | Wasabi | Lower storage costs |
+| **Multi-Cloud Strategy** | DigitalOcean Spaces | Wasabi | Good compatibility, reasonable pricing |
+| **On-Premises/Private** | MinIO | IBM Cloud Object Storage | Self-hosted, full S3 compatibility |
+| **Azure Ecosystem** | Azure Blob Storage | AWS S3 | Native Azure integration (limited S3 API) |
 
 ## Error Handling Strategy
+
+### Starlark Error Patterns
 
 All errors in Starlark use `fail()` since there's no try/except:
 
@@ -1219,6 +1425,68 @@ def safe_operation(s3, bucket, key):
     except Exception as e:
         # This will be caught by the Go implementation
         fail("Failed to get object s3://{}/{}: {}".format(bucket, key, e))
+```
+
+### Service-Specific Error Handling
+
+Different S3-compatible services return different error codes and messages. The module normalizes these into consistent Starlark failures:
+
+| Error Scenario | AWS S3 | MinIO | Azure Blob | Normalized Starlark Error |
+|----------------|--------|-------|------------|---------------------------|
+| **Bucket not found** | `NoSuchBucket` | `NoSuchBucket` | `ContainerNotFound` | `"Bucket 'name' does not exist"` |
+| **Object not found** | `NoSuchKey` | `NoSuchKey` | `BlobNotFound` | `"Object 's3://bucket/key' not found"` |
+| **Access denied** | `AccessDenied` | `AccessDenied` | `AuthorizationFailure` | `"Permission denied for 's3://bucket/key'"` |
+| **Invalid credentials** | `InvalidAccessKeyId` | `InvalidAccessKeyId` | `AuthenticationFailed` | `"Authentication failed: invalid credentials"` |
+| **Bucket already exists** | `BucketAlreadyExists` | `BucketAlreadyExists` | `ContainerAlreadyExists` | `"Bucket 'name' already exists"` |
+| **Invalid bucket name** | `InvalidBucketName` | `InvalidBucketName` | `InvalidResourceName` | `"Invalid bucket name: 'name'"` |
+| **Network timeout** | `RequestTimeout` | `RequestTimeout` | `Timeout` | `"Request timeout after 30 seconds"` |
+| **Service unavailable** | `ServiceUnavailable` | `ServiceUnavailable` | `ServerBusy` | `"Service temporarily unavailable"` |
+
+### Error Recovery Patterns
+
+```python
+def robust_upload(s3, bucket, key, content, max_attempts=3):
+    """Upload with automatic retry and error recovery"""
+    
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            # Ensure bucket exists
+            if not s3.bucket_exists(bucket):
+                print("Creating bucket: {}".format(bucket))
+                s3.create_bucket(bucket)
+            
+            # Attempt upload
+            s3.put_object(bucket, key, content)
+            print("Upload successful on attempt {}".format(attempt))
+            return
+            
+        except Exception as e:
+            error_message = str(e)
+            
+            # Determine if error is retryable
+            retryable_errors = [
+                "timeout",
+                "service unavailable", 
+                "internal server error",
+                "network",
+                "connection"
+            ]
+            
+            is_retryable = any(retry_error in error_message.lower() 
+                              for retry_error in retryable_errors)
+            
+            if not is_retryable or attempt == max_attempts:
+                fail("Upload failed after {} attempts: {}".format(attempt, e))
+            
+            print("Attempt {} failed ({}), retrying...".format(attempt, e))
+            attempt = attempt + 1
+            
+            # Exponential backoff
+            import time
+            time.sleep(min(2 ** (attempt - 1), 30))  # Cap at 30 seconds
+    
+    fail("Upload failed after {} attempts".format(max_attempts))
 ```
 
 ## Dependencies
@@ -1284,39 +1552,590 @@ for obj in objects["contents"]:
 
 ## Best Practices
 
-1. **Use Environment Variables for Credentials**
-   ```python
-   # Let the client read from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-   s3 = new_client()
-   ```
+### 1. **Security First**
 
-2. **Always Check Bucket Existence**
-   ```python
-   if not s3.bucket_exists("my-bucket"):
-       s3.create_bucket("my-bucket")
-   ```
+#### Use Environment Variables for Credentials
 
-3. **Use Content Types for Web Assets**
-   ```python
-   s3.put_object(
-       "web-bucket", 
-       "index.html", 
-       html_content,
-       content_type="text/html"
-   )
-   ```
+```python
+# Let the client read from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+s3 = new_client()
+```
 
-4. **Handle Large Files with Multi-part Upload**
-   ```python
-   # For files larger than 100MB, use multi-part upload
-   if file_size > 100 * 1024 * 1024:
-       # Use multi-part upload
-   ```
+#### Avoid Hardcoding Credentials
 
-5. **Set Appropriate Timeouts**
-   ```python
-   # For large file operations
-   s3 = new_client(timeout=300)  # 5 minutes
-   ```
+```python
+# ❌ Bad: Hardcoded credentials
+s3 = new_client(
+    access_key_id="AKIAIOSFODNN7EXAMPLE",
+    secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+)
+
+# ✅ Good: Environment-based credentials
+s3 = new_client()  # Uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+```
+
+#### Use Least Privilege Access
+
+```python
+# Create service-specific clients with limited permissions
+backup_s3 = new_client(region="us-east-1")  # Backup service account
+web_s3 = new_client(region="us-west-2")     # Web assets account
+```
+
+### 2. **Reliability Patterns**
+
+#### Always Check Bucket Existence
+
+```python
+def ensure_bucket(s3, bucket_name):
+    """Ensure bucket exists before operations"""
+    if not s3.bucket_exists(bucket_name):
+        try:
+            s3.create_bucket(bucket_name)
+            print("Created bucket: {}".format(bucket_name))
+        except Exception as e:
+            # Bucket might have been created by another process
+            if "already exists" not in str(e).lower():
+                fail("Failed to create bucket: {}".format(e))
+```
+
+#### Implement Retry Logic
+
+```python
+def retry_operation(operation, max_attempts=3):
+    """Generic retry wrapper for S3 operations"""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation()
+        except Exception as e:
+            if attempt == max_attempts:
+                fail("Operation failed after {} attempts: {}".format(max_attempts, e))
+            print("Attempt {} failed: {}".format(attempt, e))
+            time.sleep(2 ** attempt)  # Exponential backoff
+```
+
+### 3. **Performance Optimization**
+
+#### Use Appropriate Content Types
+
+```python
+# Define content type mapping
+content_types = {
+    ".html": "text/html",
+    ".css": "text/css", 
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".pdf": "application/pdf"
+}
+
+def get_content_type(file_path):
+    """Get content type from file extension"""
+    ext = file_path.split('.')[-1].lower()
+    return content_types.get('.' + ext, "application/octet-stream")
+
+# Upload with proper content type
+s3.put_object(
+    "web-bucket",
+    "index.html", 
+    html_content,
+    content_type=get_content_type("index.html")
+)
+```
+
+#### Handle Large Files with Multi-part Upload
+
+```python
+def smart_upload(s3, bucket, key, content):
+    """Choose upload method based on content size"""
+    content_size = len(content)
+    
+    # Use multipart for files larger than 100MB
+    if content_size > 100 * 1024 * 1024:
+        return multipart_upload(s3, bucket, key, content)
+    else:
+        return s3.put_object(bucket, key, content)
+```
+
+#### Set Appropriate Timeouts
+
+```python
+# For large file operations
+large_file_s3 = new_client(
+    timeout=300,      # 5 minutes
+    max_retries=5,    # More retries for large files
+    part_size=10*1024*1024  # 10MB parts for faster uploads
+)
+
+# For quick metadata operations
+quick_s3 = new_client(
+    timeout=10,       # 10 seconds
+    max_retries=2     # Fewer retries for quick operations
+)
+```
+
+### 4. **Service-Specific Optimizations**
+
+#### AWS S3 Optimizations
+
+```python
+# Use appropriate regions for performance
+us_east_s3 = new_client(region="us-east-1")  # Lowest latency for US East
+eu_west_s3 = new_client(region="eu-west-1")  # EU operations
+
+# Enable request compression for text content
+s3 = new_client(enable_compression=True)
+```
+
+#### MinIO Optimizations
+
+```python
+# MinIO requires path-style addressing
+minio_s3 = new_client(
+    endpoint="http://localhost:9000",
+    force_path_style=True,  # Required for MinIO
+    use_ssl=False,          # For local development
+    timeout=60              # Longer timeout for self-hosted
+)
+```
+
+#### DigitalOcean Spaces Optimizations
+
+```python
+# Use CDN-friendly configurations
+do_s3 = new_client(
+    endpoint="https://nyc3.digitaloceanspaces.com",
+    region="nyc3"
+)
+
+# Set cache headers for CDN
+s3.put_object(
+    "cdn-bucket",
+    "static/image.jpg",
+    image_data,
+    metadata={"Cache-Control": "public, max-age=31536000"}  # 1 year
+)
+```
+
+### 5. **Resource Management**
+
+#### Batch Operations for Efficiency
+
+```python
+def batch_delete(s3, bucket, keys):
+    """Delete objects in batches for efficiency"""
+    batch_size = 100  # Most services support up to 1000
+    
+    for i in range(0, len(keys), batch_size):
+        batch = keys[i:i + batch_size]
+        result = s3.delete_objects(bucket, batch)
+        
+        if "errors" in result:
+            for error in result["errors"]:
+                print("Failed to delete {}: {}".format(error["key"], error["message"]))
+```
+
+#### Lifecycle Management
+
+```python
+def cleanup_old_objects(s3, bucket, prefix, days_old=30):
+    """Clean up objects older than specified days"""
+    cutoff_date = time.now().add(-days_old * 24 * time.hour)
+    
+    objects = s3.list_objects(bucket, prefix=prefix)
+    old_objects = []
+    
+    for obj in objects["contents"]:
+        if obj["last_modified"] < cutoff_date:
+            old_objects.append(obj["key"])
+    
+    if old_objects:
+        print("Cleaning up {} old objects".format(len(old_objects)))
+        s3.delete_objects(bucket, old_objects)
+```
+
+### 6. **Error Handling Best Practices**
+
+#### Graceful Degradation
+
+```python
+def safe_get_object(s3, bucket, key, fallback=None):
+    """Get object with fallback handling"""
+    try:
+        return s3.get_object(bucket, key)
+    except Exception as e:
+        if "not found" in str(e).lower():
+            print("Object not found: s3://{}/{}, using fallback".format(bucket, key))
+            return fallback
+        else:
+            fail("Failed to get object: {}".format(e))
+```
+
+#### Detailed Error Reporting
+
+```python
+def detailed_error_handling(s3, bucket, key):
+    """Provide detailed error information"""
+    try:
+        return s3.get_object(bucket, key)
+    except Exception as e:
+        error_msg = str(e)
+        
+        # Add context to error message
+        context = "Operation: get_object, Bucket: {}, Key: {}".format(bucket, key)
+        
+        if "not found" in error_msg.lower():
+            fail("{} - Object does not exist".format(context))
+        elif "access denied" in error_msg.lower():
+            fail("{} - Permission denied (check credentials and policies)".format(context))
+        elif "timeout" in error_msg.lower():
+            fail("{} - Request timeout (check network connectivity)".format(context))
+        else:
+            fail("{} - Unexpected error: {}".format(context, error_msg))
+```
+
+### 7. **Migration Guidelines**
+
+#### From AWS CLI to Starlark S3
+
+```python
+# AWS CLI: aws s3 cp file.txt s3://bucket/path/
+# Starlark equivalent:
+load("file", "read")
+content = read("file.txt")
+s3.put_object("bucket", "path/file.txt", content)
+
+# AWS CLI: aws s3 sync ./local-dir s3://bucket/path/
+# Starlark equivalent:
+def sync_directory(s3, bucket, local_dir, s3_prefix):
+    """Sync local directory to S3"""
+    # Implementation would scan local directory
+    # and upload changed files
+```
+
+#### From boto3 to Starlark S3
+
+```python
+# boto3: s3.create_bucket(Bucket='bucket-name')
+# Starlark: s3.create_bucket('bucket-name')
+
+# boto3: s3.put_object(Bucket='bucket', Key='key', Body=data)
+# Starlark: s3.put_object('bucket', 'key', data)
+
+# boto3: response = s3.list_objects_v2(Bucket='bucket')
+# Starlark: objects = s3.list_objects('bucket')
+```
+
+### 8. **Testing and Validation**
+
+#### Mock Testing with MinIO
+
+```python
+def setup_test_environment():
+    """Set up MinIO for testing"""
+    return new_client(
+        endpoint="http://localhost:9000",
+        access_key_id="testkey",
+        secret_access_key="testsecret",
+        force_path_style=True,
+        use_ssl=False
+    )
+
+def test_bucket_operations():
+    """Test basic bucket operations"""
+    s3 = setup_test_environment()
+    test_bucket = "test-bucket-{}".format(int(time.now().unix()))
+    
+    # Test create
+    s3.create_bucket(test_bucket)
+    
+    # Test exists
+    if not s3.bucket_exists(test_bucket):
+        fail("Bucket should exist after creation")
+    
+    # Test delete
+    s3.delete_bucket(test_bucket)
+    
+    print("Bucket operations test passed")
+```
+
+#### Validation Helpers
+
+```python
+def validate_s3_config(s3):
+    """Validate S3 client configuration"""
+    try:
+        # Test basic connectivity
+        buckets = s3.list_buckets()
+        print("S3 connectivity verified - {} buckets accessible".format(len(buckets)))
+        return True
+    except Exception as e:
+        print("S3 configuration validation failed: {}".format(e))
+        return False
+```
+
+## Troubleshooting Guide
+
+### Common Issues and Solutions
+
+#### **Authentication Problems**
+
+| Issue | Symptoms | Solution |
+|-------|----------|----------|
+| **Invalid credentials** | `Authentication failed: invalid credentials` | Verify `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables |
+| **Expired STS tokens** | `Token has expired` | Refresh temporary credentials or use long-term access keys |
+| **Region mismatch** | `SignatureDoesNotMatch` | Ensure client region matches bucket region |
+| **Wrong endpoint** | `Connection refused` or `DNS resolution failed` | Verify endpoint URL and network connectivity |
+
+#### **Network and Connectivity Issues**
+
+| Issue | Symptoms | Solution |
+|-------|----------|----------|
+| **Timeout errors** | `Request timeout after 30 seconds` | Increase timeout value or check network connectivity |
+| **SSL/TLS errors** | `SSL certificate verification failed` | Set `use_ssl=False` for testing or fix certificate issues |
+| **Proxy configuration** | `Connection refused` | Configure HTTP_PROXY/HTTPS_PROXY environment variables |
+| **DNS resolution** | `No such host` | Verify endpoint URL or use IP address |
+
+#### **Service-Specific Issues**
+
+| Service | Issue | Solution |
+|---------|-------|----------|
+| **MinIO** | `Path-style addressing required` | Set `force_path_style=True` |
+| **DigitalOcean Spaces** | `Region not supported` | Use correct regional endpoint |
+| **Azure Blob Storage** | `Limited S3 API support` | Check feature compatibility table |
+| **Backblaze B2** | `Pre-signed URL failures` | Use alternative download methods |
+
+#### **Performance Issues**
+
+| Issue | Symptoms | Solution |
+|-------|----------|----------|
+| **Slow uploads** | `Upload taking too long` | Use multipart upload, increase `part_size`, or add concurrency |
+| **Memory usage** | `Out of memory errors` | Use streaming uploads for large files |
+| **Rate limiting** | `Too many requests` | Implement exponential backoff retry logic |
+| **Large file timeouts** | `Timeout on large files` | Increase timeout and use multipart upload |
+
+### Diagnostic Commands
+
+#### Test Connectivity
+
+```python
+def diagnose_connection(s3):
+    """Diagnose S3 connection issues"""
+    try:
+        buckets = s3.list_buckets()
+        print("✅ Connection successful - {} buckets found".format(len(buckets)))
+        return True
+    except Exception as e:
+        error_msg = str(e).lower()
+        
+        if "authentication" in error_msg or "access denied" in error_msg:
+            print("❌ Authentication failed - check credentials")
+        elif "timeout" in error_msg or "connection" in error_msg:
+            print("❌ Network connectivity issue - check endpoint and firewall")
+        elif "signature" in error_msg:
+            print("❌ Signature mismatch - check region and endpoint configuration")
+        else:
+            print("❌ Unexpected error: {}".format(e))
+        
+        return False
+```
+
+#### Test Upload Performance
+
+```python
+def test_upload_performance(s3, bucket):
+    """Test upload performance with different configurations"""
+    test_data = "x" * (1024 * 1024)  # 1MB test data
+    test_key = "performance-test-{}".format(int(time.now().unix()))
+    
+    start_time = time.now()
+    s3.put_object(bucket, test_key, test_data)
+    duration = time.now() - start_time
+    
+    print("Upload performance: {:.2f} seconds for 1MB".format(duration))
+    
+    # Cleanup
+    s3.delete_object(bucket, test_key)
+```
+
+### Environment Setup Validation
+
+#### Required Environment Variables
+
+```bash
+# Minimum required for AWS S3
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_DEFAULT_REGION="us-east-1"
+
+# Optional but recommended
+export S3_TIMEOUT="30"
+export S3_MAX_RETRIES="3"
+export S3_ENABLE_LOGGING="false"
+```
+
+#### Validation Script
+
+```python
+def validate_environment():
+    """Validate environment configuration"""
+    required_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+    missing_vars = []
+    
+    for var in required_vars:
+        if runtime.getenv(var) == None or runtime.getenv(var) == "":
+            missing_vars.append(var)
+    
+    if missing_vars:
+        fail("Missing required environment variables: {}".format(", ".join(missing_vars)))
+    
+    print("✅ Environment validation passed")
+```
+
+## Implementation Checklist
+
+### Phase 1: Foundation (Week 1)
+
+- [ ] Set up Go module structure with base package integration
+- [ ] Implement configuration system with all required options
+- [ ] Create S3 client wrapper with connection management
+- [ ] Add basic bucket operations (create, delete, list, exists)
+- [ ] Implement core object operations (put, get, delete)
+- [ ] Add comprehensive error handling and normalization
+- [ ] Write unit tests for configuration and basic operations
+- [ ] Create MinIO integration test setup
+
+### Phase 2: Object Management (Week 2)
+
+- [ ] Implement advanced object operations (copy, move, list with filters)
+- [ ] Add file upload/download with streaming support
+- [ ] Create object metadata and property management
+- [ ] Add input validation for bucket names and object keys
+- [ ] Implement batch operations for multiple objects
+- [ ] Add object existence checking and info retrieval
+- [ ] Write integration tests for all object operations
+- [ ] Add performance benchmarks for large files
+
+### Phase 3: Advanced Features (Week 3)
+
+- [ ] Implement multipart upload for large files
+- [ ] Add pre-signed URL generation (GET, PUT, POST)
+- [ ] Create object tagging and metadata management
+- [ ] Add server-side encryption options
+- [ ] Implement lifecycle management helpers
+- [ ] Add concurrent upload/download support
+- [ ] Write tests for advanced features
+- [ ] Performance optimization and memory management
+
+### Phase 4: Multi-Service Support (Week 4)
+
+- [ ] Test and validate with AWS S3
+- [ ] Implement MinIO-specific optimizations
+- [ ] Add DigitalOcean Spaces configuration
+- [ ] Test Azure Blob Storage compatibility
+- [ ] Validate Backblaze B2 integration
+- [ ] Add service-specific error handling
+- [ ] Create service compatibility documentation
+- [ ] Write cross-service integration tests
+
+### Phase 5: Documentation and Polish (Week 5)
+
+- [ ] Complete comprehensive documentation
+- [ ] Add all usage examples and best practices
+- [ ] Create migration guides from other tools
+- [ ] Add troubleshooting and diagnostic tools
+- [ ] Performance benchmarking and optimization
+- [ ] Security review and validation
+- [ ] Final integration testing
+- [ ] Release preparation and versioning
+
+### Quality Gates
+
+Each phase must meet these criteria before proceeding:
+
+#### **Code Quality**
+
+- [ ] All unit tests pass with >90% coverage
+- [ ] Integration tests pass with real services
+- [ ] Code follows Go best practices and conventions
+- [ ] Error handling is comprehensive and consistent
+- [ ] Memory usage is optimized for large files
+
+#### **Documentation Quality**
+
+- [ ] All public functions have comprehensive documentation
+- [ ] Examples are tested and working
+- [ ] Error messages are clear and actionable
+- [ ] Migration paths are documented
+- [ ] Performance characteristics are documented
+
+#### **Compatibility**
+
+- [ ] Works with all major S3-compatible services
+- [ ] Handles service-specific quirks gracefully
+- [ ] Maintains consistent API across services
+- [ ] Error messages are normalized across services
+- [ ] Configuration is flexible and intuitive
+
+### Dependencies and Resources
+
+#### **Go Dependencies**
+
+```go
+// Core AWS SDK
+github.com/aws/aws-sdk-go-v2/service/s3
+github.com/aws/aws-sdk-go-v2/config
+github.com/aws/aws-sdk-go-v2/credentials
+
+// Base package for configuration
+github.com/1set/starpkg/base
+
+// Standard library
+sync
+time
+fmt
+errors
+```
+
+#### **External Resources**
+
+- [AWS S3 API Reference](https://docs.aws.amazon.com/s3/latest/API/)
+- [MinIO Documentation](https://docs.min.io/)
+- [DigitalOcean Spaces API](https://docs.digitalocean.com/products/spaces/reference/s3-sdk-examples/)
+- [Azure Blob Storage S3 API](https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blob-s3-api)
+
+#### **Testing Resources**
+
+- MinIO server for local testing
+- AWS S3 sandbox environment
+- DigitalOcean Spaces test account
+- Azure Blob Storage test account
+
+### Success Metrics
+
+#### **Performance Targets**
+
+- [ ] 1000+ operations/second for metadata operations
+- [ ] <100ms latency for small object operations
+- [ ] 100MB/s+ throughput for large file uploads
+- [ ] <50MB memory usage for typical workloads
+- [ ] Stream 1GB+ files without memory issues
+
+#### **Reliability Targets**
+
+- [ ] 99.9% operation success rate
+- [ ] Automatic retry with exponential backoff
+- [ ] Graceful handling of network interruptions
+- [ ] Data integrity verification with checksums
+- [ ] Clear error messages for all failure scenarios
+
+#### **Usability Targets**
+
+- [ ] Intuitive API matching Starlark conventions
+- [ ] Comprehensive examples for all features
+- [ ] Easy migration from existing tools
+- [ ] Consistent behavior across all services
+- [ ] Minimal configuration required for common use cases
 
 This comprehensive plan provides a solid foundation for implementing a production-ready S3 module for Starlark that follows best practices and integrates seamlessly with the existing ecosystem.
