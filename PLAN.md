@@ -7,13 +7,24 @@
 **Description**: Complete S3-compatible storage operations for Starlark  
 **Tagline**: Unified interface for Amazon S3, MinIO, and all S3-compatible storage services
 
+## Key Features
+
+- 🔐 **Multiple Authentication Methods** - Support for access keys, environment variables, and IAM roles
+- 🪣 **Comprehensive Bucket Operations** - Create, delete, list, and manage bucket configurations
+- 📁 **Full Object Management** - Upload, download, copy, move, and delete objects with ease
+- 🏷️ **Metadata & Tagging** - Handle custom metadata and object tags
+- 🔗 **Pre-signed URLs** - Generate temporary access links for private objects
+- 📦 **Multi-part Uploads** - Efficiently handle large file uploads
+- 🌍 **Multi-Service Support** - Works with AWS S3, MinIO, DigitalOcean Spaces, and other S3-compatible services
+- ⚡ **High Performance** - Optimized for speed with streaming and concurrent operations
+
 ## Executive Summary
 
 The `s3` module provides comprehensive S3-compatible storage operations for Starlark scripts. It focuses on simplicity, security, and performance while supporting all major S3-compatible services including Amazon S3, MinIO, DigitalOcean Spaces, Backblaze B2, and more. The design emphasizes ease of use with powerful features for both simple scripts and complex applications.
 
 ## Core Design Principles
 
-1. **Function-based API**: Uses `client()` function instead of class constructors
+1. **Function-based API**: Uses `new_client()` function instead of class constructors
 2. **S3-compatible First**: Works seamlessly with any S3-compatible service
 3. **Security by Default**: Secure credential handling with base package integration
 4. **High Performance**: Optimized for large files with streaming and concurrent operations
@@ -24,7 +35,7 @@ The `s3` module provides comprehensive S3-compatible storage operations for Star
 
 ### Key Limitations Addressed
 
-- ❌ **No Classes**: Use `client()` function returning object with methods
+- ❌ **No Classes**: Use `new_client()` function returning object with methods
 - ❌ **No f-strings**: Use `.format()` method for string formatting
 - ❌ **No try/except**: Use `fail()` for error handling and None checks
 - ❌ **No `is`/`is not`**: Use `== None` and `!= None`
@@ -80,7 +91,7 @@ The `s3` module provides comprehensive S3-compatible storage operations for Star
 
 ```python
 # Client creation
-client(access_key_id=None, secret_access_key=None, region="us-east-1", **config) -> S3Client
+new_client(access_key_id=None, secret_access_key=None, region="us-east-1", **config) -> S3Client
 
 # Response builders (for advanced use cases)
 upload_options(content_type=None, metadata={}, tags={}) -> Options
@@ -96,20 +107,20 @@ validate_object_key(key) -> bool
 ### Client Creation Examples
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 
 # Create a client with AWS credentials
-s3 = client(
+s3 = new_client(
     access_key_id="YOUR_ACCESS_KEY",
     secret_access_key="YOUR_SECRET_KEY",
     region="us-east-1"
 )
 
 # Or use environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-s3 = client()
+s3 = new_client()
 
 # For S3-compatible services (e.g., MinIO)
-s3 = client(
+s3 = new_client(
     endpoint="http://localhost:9000",
     access_key_id="minioadmin",
     secret_access_key="minioadmin",
@@ -119,13 +130,33 @@ s3 = client(
 )
 
 # With advanced configuration
-s3 = client(
+s3 = new_client(
     region="eu-west-1",
     timeout=60,
     max_retries=5,
     enable_compression=True
 )
 ```
+
+## Configuration Options
+
+The S3 module supports various configuration options:
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `access_key_id` | string | AWS access key ID | Environment: `AWS_ACCESS_KEY_ID` |
+| `secret_access_key` | string | AWS secret access key | Environment: `AWS_SECRET_ACCESS_KEY` |
+| `region` | string | AWS region | `us-east-1` |
+| `endpoint` | string | Custom endpoint for S3-compatible services | AWS S3 endpoint |
+| `force_path_style` | bool | Use path-style addressing (required for MinIO) | `false` |
+| `use_ssl` | bool | Enable SSL/TLS | `true` |
+| `session_token` | string | Temporary session token | None |
+| `timeout` | int | Request timeout in seconds | `30` |
+| `max_retries` | int | Maximum retry attempts | `3` |
+| `part_size` | int | Multi-part upload part size in bytes | `5242880` (5MB) |
+| `concurrency` | int | Concurrent uploads/downloads | `3` |
+| `enable_logging` | bool | Enable request logging | `false` |
+| `user_agent` | string | Custom user agent | `starlark-s3/1.0` |
 
 ### S3Client Object API
 
@@ -349,10 +380,10 @@ for upload in uploads:
 ### 1. Basic File Management
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 
 def main():
-    s3 = client(region="us-east-1")
+    s3 = new_client(region="us-east-1")
     
     bucket_name = "my-files-bucket"
     
@@ -396,14 +427,14 @@ main()
 ### 2. Website Static File Deployment
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 load("file", "exists", "read")
 load("path", "join", "ext")
 
 def deploy_website(bucket_name, local_dir):
     """Deploy a static website to S3"""
     
-    s3 = client()
+    s3 = new_client()
     
     # Content type mapping
     content_types = {
@@ -482,7 +513,7 @@ main()
 ### 3. Backup System
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 load("time")
 load("file", "read", "exists")
 load("path", "join")
@@ -490,7 +521,7 @@ load("path", "join")
 def backup_files(bucket_name, files_to_backup):
     """Backup files to S3 with timestamp and metadata"""
     
-    s3 = client()
+    s3 = new_client()
     timestamp = time.now().format("2006-01-02-15-04-05")
     
     # Ensure backup bucket exists
@@ -532,7 +563,7 @@ def backup_files(bucket_name, files_to_backup):
 def list_backups(bucket_name, days=30):
     """List recent backups"""
     
-    s3 = client()
+    s3 = new_client()
     
     # List backup objects
     result = s3.list_objects(bucket_name, prefix="backups/", max_keys=1000)
@@ -574,14 +605,14 @@ main()
 ### 4. Data Processing Pipeline
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 load("json")
 load("time")
 
 def process_data_pipeline():
     """Process data files from one S3 bucket to another"""
     
-    s3 = client()
+    s3 = new_client()
     
     source_bucket = "raw-data"
     processed_bucket = "processed-data"
@@ -651,19 +682,19 @@ main()
 ### 5. Multi-Service Configuration
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 
 def multi_service_example():
     """Example of working with multiple S3-compatible services"""
     
     # AWS S3 client
-    aws_s3 = client(
+    aws_s3 = new_client(
         region="us-west-2",
         # Uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from environment
     )
     
     # MinIO client
-    minio_s3 = client(
+    minio_s3 = new_client(
         endpoint="http://localhost:9000",
         access_key_id="minioadmin",
         secret_access_key="minioadmin",
@@ -673,7 +704,7 @@ def multi_service_example():
     )
     
     # DigitalOcean Spaces client
-    do_s3 = client(
+    do_s3 = new_client(
         endpoint="https://nyc3.digitaloceanspaces.com",
         access_key_id="YOUR_DO_SPACES_KEY",
         secret_access_key="YOUR_DO_SPACES_SECRET",
@@ -728,12 +759,12 @@ main()
 ### 6. Error Handling and Validation
 
 ```python
-load("s3", "client", "validate_bucket_name", "validate_object_key")
+load("s3", "new_client", "validate_bucket_name", "validate_object_key")
 
 def safe_s3_operations():
     """Example of robust S3 operations with error handling"""
     
-    s3 = client()
+    s3 = new_client()
     
     def safe_upload(bucket, key, content):
         """Safely upload with validation and error handling"""
@@ -977,9 +1008,9 @@ export S3_USER_AGENT="starlark-s3/1.0"
 #### Success Criteria
 
 ```python
-load("s3", "client")
+load("s3", "new_client")
 
-s3 = client(region="us-east-1")
+s3 = new_client(region="us-east-1")
 s3.create_bucket("test-bucket")
 s3.put_object("test-bucket", "hello.txt", "Hello, World!")
 content = s3.get_object("test-bucket", "hello.txt")
@@ -1045,14 +1076,14 @@ s3.set_object_tags("bucket", "file.txt", {"env": "prod"})
 
 ```python
 # MinIO support
-minio = client(
+minio = new_client(
     endpoint="http://localhost:9000",
     force_path_style=True,
     use_ssl=False
 )
 
 # DigitalOcean Spaces support
-do_spaces = client(
+do_spaces = new_client(
     endpoint="https://nyc3.digitaloceanspaces.com",
     region="nyc3"
 )
@@ -1219,5 +1250,73 @@ def safe_operation(s3, bucket, key):
 - **Documentation**: Comprehensive examples for all features
 - **Compatibility**: Work seamlessly with existing Starlark modules
 - **Migration**: Easy adoption for users of other S3 libraries
+
+## Installation
+
+```go
+go get github.com/1set/starpkg/s3
+```
+
+## Quick Start Example
+
+```python
+load("s3", "new_client")
+
+# Create a client
+s3 = new_client(
+    access_key_id="YOUR_ACCESS_KEY",
+    secret_access_key="YOUR_SECRET_KEY",
+    region="us-east-1"
+)
+
+# Upload an object
+s3.put_object("my-bucket", "hello.txt", "Hello, World!")
+
+# Download an object
+content = s3.get_object("my-bucket", "hello.txt")
+print(content)  # "Hello, World!"
+
+# List objects
+objects = s3.list_objects("my-bucket")
+for obj in objects["contents"]:
+    print(obj["key"], obj["size"])
+```
+
+## Best Practices
+
+1. **Use Environment Variables for Credentials**
+   ```python
+   # Let the client read from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+   s3 = new_client()
+   ```
+
+2. **Always Check Bucket Existence**
+   ```python
+   if not s3.bucket_exists("my-bucket"):
+       s3.create_bucket("my-bucket")
+   ```
+
+3. **Use Content Types for Web Assets**
+   ```python
+   s3.put_object(
+       "web-bucket", 
+       "index.html", 
+       html_content,
+       content_type="text/html"
+   )
+   ```
+
+4. **Handle Large Files with Multi-part Upload**
+   ```python
+   # For files larger than 100MB, use multi-part upload
+   if file_size > 100 * 1024 * 1024:
+       # Use multi-part upload
+   ```
+
+5. **Set Appropriate Timeouts**
+   ```python
+   # For large file operations
+   s3 = new_client(timeout=300)  # 5 minutes
+   ```
 
 This comprehensive plan provides a solid foundation for implementing a production-ready S3 module for Starlark that follows best practices and integrates seamlessly with the existing ecosystem.
