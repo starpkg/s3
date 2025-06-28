@@ -14,6 +14,7 @@
 - 📁 **Full Object Management** - Upload, download, copy, move, and delete objects with ease
 - 🏷️ **Metadata & Tagging** - Handle custom metadata and object tags
 - 🔗 **Pre-signed URLs** - Generate temporary access links for private objects
+- 🌐 **Public URLs** - Get direct HTTP URLs for objects in public buckets
 - 📦 **Multi-part Uploads** - Efficiently handle large file uploads
 - 🌍 **Multi-Service Support** - Works with Amazon S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO, and other S3-compatible services
 - ⚡ **High Performance** - Optimized for speed with streaming and concurrent operations
@@ -25,7 +26,7 @@ The `s3` module provides comprehensive S3-compatible storage operations for Star
 ## Quick Start
 
 ```python
-load("s3", "create_client")
+load("s3", "create_client", "get_public_url")
 
 # Create client (uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from environment)
 s3 = create_client()
@@ -35,6 +36,11 @@ s3.create_bucket("my-bucket")
 
 # Upload a file
 s3.put_object("my-bucket", "hello.txt", "Hello, World!")
+
+# Get the public URL (for public buckets)
+url = get_public_url(s3, "my-bucket", "hello.txt")
+print("Public URL:", url)
+# Output: https://my-bucket.s3.us-east-1.amazonaws.com/hello.txt
 
 # Download the file
 content = s3.get_object("my-bucket", "hello.txt")
@@ -253,6 +259,16 @@ services = get_supported_services()
 # Returns: ["aws_s3", "cloudflare_r2", "backblaze_b2", "digitalocean_spaces", "minio"]
 ```
 
+The module can be loaded with individual functions:
+
+```python
+# Import specific functions
+load("s3", "create_client", "get_public_url", "validate_bucket_name")
+
+# Or import all core functions
+load("s3", "create_client", "get_public_url", "parse_s3_url", "generate_s3_url", "validate_bucket_name", "get_supported_services")
+```
+
 #### `get_client_info(client) -> dict`
 
 **Purpose**: Returns connection details and configuration of an S3 client.
@@ -262,6 +278,37 @@ services = get_supported_services()
 - `client` (S3Client): S3 client instance
 
 **Returns**: Dictionary with client configuration details
+
+#### `get_public_url(client, bucket, key) -> string`
+
+**Purpose**: Generates the public HTTP(S) URL for an object in a public bucket.
+
+**Parameters**:
+
+- `client` (S3Client): S3 client instance (to determine service type and region)
+- `bucket` (string): Bucket name
+- `key` (string): Object key
+
+**Returns**: Public HTTP(S) URL string
+
+**Example**:
+
+```python
+s3 = create_client()
+s3.put_object("public-bucket", "image.jpg", image_data)
+url = get_public_url(s3, "public-bucket", "image.jpg")
+# Returns: "https://public-bucket.s3.us-east-1.amazonaws.com/image.jpg"
+```
+
+**Note**: This function generates the URL format but doesn't verify that the bucket/object is actually publicly accessible. Ensure proper bucket policies are configured for public access.
+
+**Service-specific URL formats**:
+
+- **AWS S3**: `https://bucket.s3.region.amazonaws.com/key` (virtual-hosted style)
+- **Cloudflare R2**: `https://pub-{hash}.r2.dev/key` (for public R2 buckets)
+- **DigitalOcean Spaces**: `https://bucket.region.digitaloceanspaces.com/key`
+- **Backblaze B2**: `https://bucket.s3.region.backblazeb2.com/key`
+- **MinIO**: `https://endpoint/bucket/key` (path-style, based on configured endpoint)
 
 ### Client Creation Examples
 
@@ -745,6 +792,51 @@ def main():
     # Generate a download link
     url = s3.presign_url(bucket_name, "report.pdf", expires_in=3600)
     print("Download URL:", url)
+
+main()
+```
+
+#### Upload and Get Public URL
+
+```python
+load("s3", "create_client", "get_public_url")
+
+def upload_and_get_url(s3, bucket, key, content):
+    """Upload content and return the public URL"""
+    
+    # Upload the file
+    s3.put_object(bucket, key, content)
+    
+    # Get the public URL immediately
+    url = get_public_url(s3, bucket, key)
+    return url
+
+def main():
+    s3 = create_client()
+    
+    # Upload an image and get its public URL
+    image_url = upload_and_get_url(
+        s3, 
+        "my-public-bucket", 
+        "uploads/photo.jpg", 
+        image_content
+    )
+    print("Image available at: {}".format(image_url))
+    
+    # Upload multiple files and collect URLs
+    files = {
+        "docs/manual.pdf": pdf_content,
+        "images/logo.png": logo_content,
+        "data/report.csv": csv_content
+    }
+    
+    urls = []
+    for file_path, content in files.items():
+        url = upload_and_get_url(s3, "my-public-bucket", file_path, content)
+        urls.append(url)
+        print("Uploaded: {}".format(url))
+    
+    return urls
 
 main()
 ```
