@@ -30,7 +30,7 @@ def main():
     print()
     
     # Create S3 client
-    s3 = create_client(aws_region="us-east-1")
+    s3 = create_client(region="us-east-1")
     
     # Step 1: Setup buckets
     setup_pipeline_buckets(s3, source_bucket, dest_bucket)

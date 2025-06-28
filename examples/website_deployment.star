@@ -27,7 +27,7 @@ def main():
     print()
     
     # Create S3 client
-    s3 = create_client(aws_region="us-east-1")
+    s3 = create_client(region="us-east-1")
     
     # Step 1: Setup bucket for website hosting
     setup_website_bucket(s3, bucket_name)

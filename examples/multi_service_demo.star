@@ -52,7 +52,7 @@ def test_aws_s3():
     try:
         s3 = create_client(
             service_type="aws_s3",
-            aws_region="us-east-1"
+            region="us-east-1"
         )
         
         test_basic_operations(s3, "aws-test-bucket", "AWS S3")
@@ -68,8 +68,8 @@ def test_minio():
         s3 = create_client(
             service_type="minio",
             endpoint="http://localhost:9000",
-            aws_access_key="minioadmin",
-            aws_secret_key="minioadmin",
+            access_key="minioadmin",
+            secret_key="minioadmin",
             force_path_style=True,
             use_ssl=False
         )
@@ -104,9 +104,9 @@ def test_cloudflare_r2():
         s3 = create_client(
             service_type="cloudflare_r2",
             endpoint=runtime.getenv("R2_ENDPOINT"),
-            aws_access_key=runtime.getenv("R2_ACCESS_KEY"),
-            aws_secret_key=runtime.getenv("R2_SECRET_KEY"),
-            aws_region="auto"
+            access_key=runtime.getenv("R2_ACCESS_KEY"),
+            secret_key=runtime.getenv("R2_SECRET_KEY"),
+            region="auto"
         )
         
         test_basic_operations(s3, "r2-test-bucket", "Cloudflare R2")
@@ -120,9 +120,9 @@ def test_digitalocean_spaces():
         s3 = create_client(
             service_type="digitalocean_spaces",
             endpoint=runtime.getenv("SPACES_ENDPOINT"),
-            aws_access_key=runtime.getenv("SPACES_ACCESS_KEY"),
-            aws_secret_key=runtime.getenv("SPACES_SECRET_KEY"),
-            aws_region="nyc3"
+            access_key=runtime.getenv("SPACES_ACCESS_KEY"),
+            secret_key=runtime.getenv("SPACES_SECRET_KEY"),
+            region="nyc3"
         )
         
         test_basic_operations(s3, "spaces-test-bucket", "DigitalOcean Spaces")

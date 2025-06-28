@@ -27,7 +27,7 @@ def main():
     print()
     
     # Create S3 client (uses environment variables for credentials)
-    s3 = create_client(aws_region="us-east-1")
+    s3 = create_client(region="us-east-1")
     
     # Step 1: Ensure bucket exists
     ensure_bucket_exists(s3, bucket_name)

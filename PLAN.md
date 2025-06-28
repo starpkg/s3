@@ -22,6 +22,52 @@
 
 The `s3` module provides comprehensive S3-compatible storage operations for Starlark scripts. It focuses on simplicity, security, and performance while supporting all major S3-compatible services including Amazon S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, and MinIO. The design emphasizes ease of use with powerful features for both simple scripts and complex applications.
 
+## Quick Start
+
+```python
+load("s3", "create_client")
+
+# Create client (uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from environment)
+s3 = create_client()
+
+# Create a bucket
+s3.create_bucket("my-bucket")
+
+# Upload a file
+s3.put_object("my-bucket", "hello.txt", "Hello, World!")
+
+# Download the file
+content = s3.get_object("my-bucket", "hello.txt")
+print(content)  # "Hello, World!"
+
+# List objects
+objects = s3.list_objects("my-bucket")
+for obj in objects["contents"]:
+    print("{} ({} bytes)".format(obj["key"], obj["size"]))
+```
+
+For other S3-compatible services:
+
+```python
+# MinIO
+s3 = create_client(
+    service_type="minio",
+    endpoint="http://localhost:9000",
+    access_key="minioadmin",
+    secret_key="minioadmin",
+    force_path_style=True,
+    use_ssl=False
+)
+
+# Cloudflare R2
+s3 = create_client(
+    service_type="cloudflare_r2",
+    endpoint="https://<account-id>.r2.cloudflarestorage.com",
+    access_key="YOUR_R2_ACCESS_KEY",
+    secret_key="YOUR_R2_SECRET_KEY"
+)
+```
+
 ## Supported S3-Compatible Services
 
 The module provides first-class support for the following S3-compatible storage services:
@@ -113,10 +159,10 @@ All services support the core S3 API features including bucket operations, objec
 
 - `service_type` (string, optional): Target service type. Options: `"aws_s3"`, `"cloudflare_r2"`, `"backblaze_b2"`, `"digitalocean_spaces"`, `"minio"`, `"auto"`. Default: `"auto"`
 - `endpoint` (string, optional): Custom endpoint URL for S3-compatible services. Auto-detected based on service_type if not provided
-- `aws_region` (string, optional): AWS region or equivalent. Default: `"us-east-1"` or `AWS_DEFAULT_REGION` environment variable
-- `aws_access_key` (string, optional): Access key ID. Default: `AWS_ACCESS_KEY_ID` environment variable
-- `aws_secret_key` (string, optional): Secret access key. Default: `AWS_SECRET_ACCESS_KEY` environment variable  
-- `aws_session_token` (string, optional): Session token for temporary credentials. Default: `AWS_SESSION_TOKEN` environment variable
+- `region` (string, optional): AWS region or equivalent. Default: `"us-east-1"` or `AWS_DEFAULT_REGION` environment variable
+- `access_key` (string, optional): Access key ID. Default: `AWS_ACCESS_KEY_ID` environment variable
+- `secret_key` (string, optional): Secret access key. Default: `AWS_SECRET_ACCESS_KEY` environment variable  
+- `session_token` (string, optional): Session token for temporary credentials. Default: `AWS_SESSION_TOKEN` environment variable
 - `force_path_style` (bool, optional): Use path-style addressing (required for MinIO). Default: `False`
 - `use_ssl` (bool, optional): Enable/disable SSL. Default: `True`
 - `timeout` (int, optional): Connection timeout in seconds. Default: `30`
@@ -133,7 +179,7 @@ All services support the core S3 API features including bucket operations, objec
 ```python
 s3 = create_client(
     service_type="aws_s3",
-    aws_region="us-east-1",
+    region="us-east-1",
     timeout=60
 )
 ```
@@ -222,12 +268,12 @@ services = get_supported_services()
 ```python
 load("s3", "create_client")
 
-# Create a client with AWS credentials
+# Create a client with credentials
 s3 = create_client(
     service_type="aws_s3",
-    aws_access_key="YOUR_ACCESS_KEY",
-    aws_secret_key="YOUR_SECRET_KEY",
-    aws_region="us-east-1"
+    access_key="YOUR_ACCESS_KEY",
+    secret_key="YOUR_SECRET_KEY",
+    region="us-east-1"
 )
 
 # Or use environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
@@ -237,18 +283,18 @@ s3 = create_client()  # Auto-detects AWS S3 with environment variables
 s3 = create_client(
     service_type="cloudflare_r2",
     endpoint="https://<account-id>.r2.cloudflarestorage.com",
-    aws_access_key="YOUR_R2_ACCESS_KEY",
-    aws_secret_key="YOUR_R2_SECRET_KEY",
-    aws_region="auto"
+    access_key="YOUR_R2_ACCESS_KEY",
+    secret_key="YOUR_R2_SECRET_KEY",
+    region="auto"
 )
 
 # For MinIO (self-hosted)
 s3 = create_client(
     service_type="minio",
     endpoint="http://localhost:9000",
-    aws_access_key="minioadmin",
-    aws_secret_key="minioadmin",
-    aws_region="us-east-1",
+    access_key="minioadmin",
+    secret_key="minioadmin",
+    region="us-east-1",
     force_path_style=True,  # Required for MinIO
     use_ssl=False
 )
@@ -257,18 +303,18 @@ s3 = create_client(
 s3 = create_client(
     service_type="digitalocean_spaces",
     endpoint="https://nyc3.digitaloceanspaces.com",
-    aws_access_key="YOUR_SPACES_KEY",
-    aws_secret_key="YOUR_SPACES_SECRET",
-    aws_region="nyc3"
+    access_key="YOUR_SPACES_KEY",
+    secret_key="YOUR_SPACES_SECRET",
+    region="nyc3"
 )
 
 # For Backblaze B2
 s3 = create_client(
     service_type="backblaze_b2",
     endpoint="https://s3.us-west-004.backblazeb2.com",
-    aws_access_key="YOUR_APPLICATION_KEY_ID",
-    aws_secret_key="YOUR_APPLICATION_KEY",
-    aws_region="us-west-004"
+    access_key="YOUR_APPLICATION_KEY_ID",
+    secret_key="YOUR_APPLICATION_KEY",
+    region="us-west-004"
 )
 ```
 
@@ -279,10 +325,10 @@ The S3 module supports various configuration options:
 | Option | Type | Description | Default |
 |--------|------|-------------|---------|
 | `service_type` | string | Service type ("aws_s3", "cloudflare_r2", "backblaze_b2", "digitalocean_spaces", "minio", "auto") | `auto` |
-| `aws_access_key` | string | AWS access key ID | Environment: `AWS_ACCESS_KEY_ID` |
-| `aws_secret_key` | string | AWS secret access key | Environment: `AWS_SECRET_ACCESS_KEY` |
-| `aws_session_token` | string | AWS session token | Environment: `AWS_SESSION_TOKEN` |
-| `aws_region` | string | AWS region | Environment: `AWS_DEFAULT_REGION` or `us-east-1` |
+| `access_key` | string | Access key ID | Environment: `AWS_ACCESS_KEY_ID` |
+| `secret_key` | string | Secret access key | Environment: `AWS_SECRET_ACCESS_KEY` |
+| `session_token` | string | Session token | Environment: `AWS_SESSION_TOKEN` |
+| `region` | string | Region | Environment: `AWS_DEFAULT_REGION` or `us-east-1` |
 | `endpoint` | string | Custom endpoint for S3-compatible services | Auto-detected based on service_type |
 | `force_path_style` | bool | Use path-style addressing (required for MinIO) | `false` |
 | `use_ssl` | bool | Enable SSL/TLS | `true` |
@@ -656,13 +702,13 @@ The S3 module supports various configuration options:
 
 ### Basic Usage Examples
 
-#### Simple File Operations
+#### Basic File Operations
 
 ```python
 load("s3", "create_client")
 
 def main():
-    s3 = create_client(aws_region="us-east-1")
+    s3 = create_client(region="us-east-1")
     
     bucket_name = "my-files-bucket"
     
@@ -703,24 +749,24 @@ def main():
 main()
 ```
 
-#### Service-Specific Examples
+#### Service-Specific Configuration Examples
 
 ```python
 # Cloudflare R2 example
 r2_client = create_client(
     service_type="cloudflare_r2",
     endpoint="https://<account-id>.r2.cloudflarestorage.com",
-    aws_access_key="YOUR_R2_ACCESS_KEY",
-    aws_secret_key="YOUR_R2_SECRET_KEY",
-    aws_region="auto"
+    access_key="YOUR_R2_ACCESS_KEY",
+    secret_key="YOUR_R2_SECRET_KEY",
+    region="auto"
 )
 
 # MinIO example  
 minio_client = create_client(
     service_type="minio",
     endpoint="http://localhost:9000",
-    aws_access_key="minioadmin",
-    aws_secret_key="minioadmin",
+    access_key="minioadmin",
+    secret_key="minioadmin",
     force_path_style=True,
     use_ssl=False
 )
@@ -730,6 +776,75 @@ for client in [r2_client, minio_client]:
     client.put_object("test-bucket", "test.txt", "Hello World!")
     content = client.get_object("test-bucket", "test.txt")
     print("Content:", content)
+```
+
+#### Metadata and Tagging Example
+
+```python
+load("s3", "create_client")
+
+def main():
+    s3 = create_client()
+    bucket = "metadata-demo"
+    
+    # Upload with metadata and tags
+    s3.put_object(
+        bucket,
+        "document.pdf",
+        "Document content...",
+        content_type="application/pdf",
+        metadata={
+            "author": "Jane Doe",
+            "department": "Engineering",
+            "version": "2.1"
+        },
+        tags={
+            "project": "alpha",
+            "confidential": "true"
+        }
+    )
+    
+    # Retrieve metadata
+    metadata = s3.get_object_metadata(bucket, "document.pdf")
+    print("Author:", metadata.get("author"))
+    
+    # Get tags
+    tags = s3.get_object_tags(bucket, "document.pdf")
+    for key, value in tags.items():
+        print("{}: {}".format(key, value))
+
+main()
+```
+
+#### Error Handling Example
+
+```python
+load("s3", "create_client", "validate_bucket_name")
+
+def safe_upload(s3, bucket_name, object_key, content):
+    """Safely upload with validation and error handling"""
+    
+    # Validate bucket name
+    if not validate_bucket_name(bucket_name):
+        fail("Invalid bucket name: {}".format(bucket_name))
+    
+    # Ensure bucket exists
+    if not s3.bucket_exists(bucket_name):
+        s3.create_bucket(bucket_name)
+        print("Created bucket: {}".format(bucket_name))
+    
+    # Upload with error handling
+    try:
+        s3.put_object(bucket_name, object_key, content)
+        print("Upload successful: s3://{}/{}".format(bucket_name, object_key))
+    except Exception as e:
+        fail("Upload failed: {}".format(e))
+
+def main():
+    s3 = create_client()
+    safe_upload(s3, "my-safe-bucket", "test.txt", "Safe content")
+
+main()
 ```
 
 ## Complete Usage Examples
@@ -744,3 +859,232 @@ The following examples have been moved to separate files for better organization
 - [`examples/error_handling_best_practices.star`](examples/error_handling_best_practices.star) - Robust error handling patterns
 
 Each example file contains complete, runnable Starlark code with detailed comments explaining the implementation.
+
+## Implementation Architecture
+
+### File Structure
+
+```
+s3/
+├── s3.go           # Main module implementation and client creation
+├── client.go       # S3 client wrapper and lifecycle management  
+├── bucket.go       # Bucket operations (create, delete, list, etc.)
+├── object.go       # Object operations (put, get, delete, list, etc.)
+├── multipart.go    # Multi-part upload handling
+├── metadata.go     # Metadata and tagging operations
+├── presign.go      # Pre-signed URL generation
+├── utils.go        # Utility functions and validation
+├── errors.go       # Error types and handling
+├── config.go       # Configuration system with base package integration
+├── s3_test.go      # Unit tests
+├── example_test.go # Integration tests and examples
+├── README.md       # User documentation
+├── go.mod
+└── go.sum
+```
+
+### Core Components
+
+#### 1. Client Structure
+
+```go
+type S3Client struct {
+    config      *Config
+    awsClient   *s3.Client
+    mu          sync.RWMutex
+    closed      atomic.Bool
+}
+```
+
+#### 2. Configuration System
+
+Using the base package pattern for type-safe configuration:
+
+```go
+type Config struct {
+    // Authentication
+    AccessKeyID     *base.ConfigOption[string]       // Access key ID
+    SecretAccessKey *base.ConfigOption[base.Secret]  // Secret key (secure)
+    SessionToken    *base.ConfigOption[string]       // Temporary session token
+    
+    // Service configuration
+    Region          *base.ConfigOption[string]       // Region
+    Endpoint        *base.ConfigOption[string]       // Custom endpoint URL
+    ForcePathStyle  *base.ConfigOption[bool]         // Use path-style addressing
+    UseSSL          *base.ConfigOption[bool]         // Enable/disable SSL
+    
+    // Performance and reliability
+    Timeout         *base.ConfigOption[int]          // Request timeout (seconds)
+    MaxRetries      *base.ConfigOption[int]          // Maximum retry attempts
+    PartSize        *base.ConfigOption[int64]        // Multi-part upload part size
+    Concurrency     *base.ConfigOption[int]          // Concurrent uploads/downloads
+    
+    // Advanced options
+    EnableLogging   *base.ConfigOption[bool]         // Enable request logging
+    UserAgent       *base.ConfigOption[string]       // Custom user agent
+}
+```
+
+#### 3. Response Structures
+
+```go
+type BucketInfo struct {
+    Name         string    `json:"name"`
+    CreationDate time.Time `json:"creation_date"`
+    Region       string    `json:"region,omitempty"`
+}
+
+type ObjectInfo struct {
+    Key          string            `json:"key"`
+    Size         int64             `json:"size"`
+    LastModified time.Time         `json:"last_modified"`
+    ETag         string            `json:"etag"`
+    ContentType  string            `json:"content_type,omitempty"`
+    Metadata     map[string]string `json:"metadata,omitempty"`
+}
+
+type ListObjectsResult struct {
+    Contents        []ObjectInfo `json:"contents"`
+    CommonPrefixes  []string     `json:"common_prefixes,omitempty"`
+    IsTruncated     bool         `json:"is_truncated"`
+    NextMarker      string       `json:"next_marker,omitempty"`
+    MaxKeys         int          `json:"max_keys"`
+    Prefix          string       `json:"prefix,omitempty"`
+    Delimiter       string       `json:"delimiter,omitempty"`
+}
+```
+
+### Environment Variable Configuration
+
+```bash
+# Primary service configuration
+export S3_SERVICE_TYPE="aws_s3"                    # Service type
+export S3_ENDPOINT="https://s3.amazonaws.com"      # Custom endpoint
+export S3_TIMEOUT="30"                             # Connection timeout
+export S3_MAX_RETRIES="3"                          # Maximum retry attempts
+
+# Authentication (compatible with AWS CLI/SDK)
+export AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY"         # Access key ID
+export AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY"     # Secret access key
+export AWS_SESSION_TOKEN="YOUR_SESSION_TOKEN"      # Session token (optional)
+export AWS_DEFAULT_REGION="us-east-1"              # Region
+
+# S3-specific configuration
+export S3_FORCE_PATH_STYLE="false"                 # Path-style addressing
+export S3_USE_SSL="true"                           # Enable SSL/TLS
+export S3_PART_SIZE="5242880"                      # Multipart upload part size (5MB)
+export S3_CONCURRENCY="3"                          # Concurrent operations
+
+# Debug and monitoring
+export S3_ENABLE_LOGGING="false"                   # Enable request logging
+export S3_USER_AGENT="starlark-s3/1.0"            # Custom user agent
+```
+
+## Security & Performance
+
+### Security Considerations
+
+#### 1. Credential Management
+
+- **Never log credentials**: Credentials are never exposed in error messages or logs
+- **Secure storage**: Use `base.Secret` type for sensitive configuration values
+- **Environment variables**: Support standard AWS credential chain
+- **Automatic rotation**: Compatible with AWS credential rotation mechanisms
+
+#### 2. Input Validation
+
+- **Bucket names**: Validate according to AWS S3 naming rules
+- **Object keys**: Sanitize to prevent path traversal and injection attacks
+- **Size limits**: Enforce reasonable limits for uploads and downloads
+- **Content validation**: Validate content types and encoding
+
+#### 3. Network Security
+
+- **HTTPS by default**: All communications use HTTPS unless explicitly disabled
+- **Certificate validation**: Full SSL/TLS certificate chain validation
+- **Request signing**: All requests signed with AWS Signature Version 4
+- **Timeout protection**: Configurable timeouts prevent hanging connections
+
+### Performance Optimizations
+
+#### 1. Connection Management
+
+- **Connection pooling**: HTTP connections are pooled and reused
+- **Keep-alive**: Persistent connections for multiple requests
+- **DNS caching**: Automatic DNS result caching for performance
+- **Circuit breaker**: Automatic failure detection and recovery
+
+#### 2. Upload/Download Optimization
+
+- **Streaming**: Large files are streamed to minimize memory usage
+- **Multipart uploads**: Automatic multipart uploads for large files
+- **Concurrent operations**: Parallel uploads/downloads when beneficial
+- **Resume capability**: Support for resuming interrupted transfers
+
+#### 3. Caching Strategy
+
+- **Metadata caching**: Client-side caching of frequently accessed metadata
+- **Response caching**: Intelligent caching of list operations
+- **Conditional requests**: Use ETags for conditional operations
+- **Exponential backoff**: Intelligent retry with increasing delays
+
+### Performance Targets
+
+- **Throughput**: 1000+ small operations per second
+- **Latency**: <100ms for metadata operations
+- **Memory efficiency**: <50MB memory usage for typical workloads
+- **Large file support**: Stream files of any size without memory issues
+- **Concurrent operations**: Support for 100+ concurrent requests
+
+## Migration Guide
+
+### From AWS CLI
+
+```bash
+# AWS CLI command
+aws s3 cp file.txt s3://bucket/path/
+
+# Starlark equivalent
+load("s3", "create_client")
+load("file", "read")
+
+s3 = create_client()
+content = read("file.txt")
+s3.put_object("bucket", "path/file.txt", content)
+```
+
+### From boto3 (Python)
+
+```python
+# boto3 Python code
+import boto3
+s3 = boto3.client('s3')
+s3.create_bucket(Bucket='bucket-name')
+s3.put_object(Bucket='bucket', Key='key', Body=data)
+
+# Starlark equivalent
+load("s3", "create_client")
+s3 = create_client()
+s3.create_bucket('bucket-name')
+s3.put_object('bucket', 'key', data)
+```
+
+### From MinIO Client
+
+```go
+// MinIO Go client
+minioClient, _ := minio.New("localhost:9000", &minio.Options{
+    Creds: credentials.NewStaticV4("minioadmin", "minioadmin", ""),
+})
+
+// Starlark equivalent
+load("s3", "create_client")
+s3 = create_client(
+    service_type="minio",
+    endpoint="http://localhost:9000", 
+    access_key="minioadmin",
+    secret_key="minioadmin",
+    force_path_style=True,
+    use_ssl=False
+)
+```
