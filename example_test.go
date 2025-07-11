@@ -146,12 +146,11 @@ def test_client_configuration():
         user_agent="test-agent",
     )
 
-    # Get client configuration
-    config = client.get_config()
-    if config == None:
-        fail("Failed to get client configuration")
+    # Check if client was created successfully (client configuration access removed)
+    if client == None:
+        fail("Failed to create client")
 
-    print("Client configuration retrieved successfully!")
+    print("Client configuration test completed successfully!")
 
 test_client_configuration()
 `
@@ -197,8 +196,8 @@ def test_bucket_operations():
     if not hasattr(client, "bucket_exists"):
         fail("bucket_exists method not found")
 
-    if not hasattr(client, "get_bucket_location"):
-        fail("get_bucket_location method not found")
+    if not hasattr(client, "get_bucket_info"):
+        fail("get_bucket_info method not found")
 
     print("All bucket operation methods are available!")
 

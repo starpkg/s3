@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -193,24 +194,48 @@ func (c *S3Client) BucketExists(ctx context.Context, bucket string) (bool, error
 	return true, nil
 }
 
-// GetBucketLocation gets the region of a bucket
-func (c *S3Client) GetBucketLocation(ctx context.Context, bucket string) (string, error) {
+// GetBucketInfo gets comprehensive information about a bucket
+func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	result, err := c.client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
+	// Get bucket location
+	locationResult, err := c.client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
 		Bucket: aws.String(bucket),
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get bucket location: %w", err)
+		return nil, fmt.Errorf("failed to get bucket location: %w", err)
 	}
 
-	location := string(result.LocationConstraint)
-	if location == "" {
-		location = "us-east-1"
+	// Handle empty location constraint (means us-east-1)
+	region := string(locationResult.LocationConstraint)
+	if region == "" {
+		region = "us-east-1"
 	}
 
-	return location, nil
+	// Get bucket creation date from list buckets (we need to find our bucket)
+	listResult, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list buckets: %w", err)
+	}
+
+	var bucketInfo *BucketInfo
+	for _, b := range listResult.Buckets {
+		if aws.ToString(b.Name) == bucket {
+			bucketInfo = &BucketInfo{
+				Name:         bucket,
+				Region:       region,
+				CreationDate: aws.ToTime(b.CreationDate),
+			}
+			break
+		}
+	}
+
+	if bucketInfo == nil {
+		return nil, fmt.Errorf("bucket %s not found", bucket)
+	}
+
+	return bucketInfo, nil
 }
 
 // PutObject uploads an object to S3
@@ -237,6 +262,36 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 	return nil
 }
 
+// PutObjectFromFile uploads a file to S3
+func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, options ...PutObjectOption) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   file,
+	}
+
+	// Apply options
+	for _, opt := range options {
+		opt(input)
+	}
+
+	_, err = c.client.PutObject(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to put object %s/%s from file %s: %w", bucket, key, filePath, err)
+	}
+
+	return nil
+}
+
 // GetObject downloads an object from S3
 func (c *S3Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
 	c.mu.RLock()
@@ -251,6 +306,34 @@ func (c *S3Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCl
 	}
 
 	return result.Body, nil
+}
+
+// GetObjectToFile downloads an object from S3 to a local file
+func (c *S3Client) GetObjectToFile(ctx context.Context, bucket, key, filePath string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get object %s/%s: %w", bucket, key, err)
+	}
+	defer result.Body.Close()
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, result.Body)
+	if err != nil {
+		return fmt.Errorf("failed to copy object %s/%s to file %s: %w", bucket, key, filePath, err)
+	}
+
+	return nil
 }
 
 // DeleteObject deletes an object from S3
@@ -356,6 +439,95 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 		ContentType:  aws.ToString(result.ContentType),
 		Metadata:     result.Metadata,
 	}, nil
+}
+
+// SetObjectInfo sets metadata and tags for an object by copying it with new metadata
+func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, metadata map[string]string, tags map[string]string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Copy object to itself with new metadata
+	input := &s3.CopyObjectInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(key),
+		CopySource: aws.String(bucket + "/" + key),
+		Metadata:   metadata,
+	}
+
+	// Set metadata directive to replace existing metadata
+	input.MetadataDirective = "REPLACE"
+
+	_, err := c.client.CopyObject(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to set object info for %s/%s: %w", bucket, key, err)
+	}
+
+	// Set tags if provided
+	if len(tags) > 0 {
+		var tagSet []types.Tag
+		for k, v := range tags {
+			tagSet = append(tagSet, types.Tag{
+				Key:   aws.String(k),
+				Value: aws.String(v),
+			})
+		}
+
+		_, err = c.client.PutObjectTagging(ctx, &s3.PutObjectTaggingInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+			Tagging: &types.Tagging{
+				TagSet: tagSet,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set tags for %s/%s: %w", bucket, key, err)
+		}
+	}
+
+	return nil
+}
+
+// CopyObject copies an object from one location to another
+func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, options ...PutObjectOption) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	input := &s3.CopyObjectInput{
+		Bucket:     aws.String(dstBucket),
+		Key:        aws.String(dstKey),
+		CopySource: aws.String(srcBucket + "/" + srcKey),
+	}
+
+	// Create a dummy PutObjectInput to apply options, then transfer relevant fields
+	dummyPutInput := &s3.PutObjectInput{}
+	for _, opt := range options {
+		opt(dummyPutInput)
+	}
+
+	// Transfer applicable fields from PutObjectInput to CopyObjectInput
+	if dummyPutInput.ContentType != nil {
+		input.ContentType = dummyPutInput.ContentType
+		input.MetadataDirective = "REPLACE"
+	}
+	if dummyPutInput.Metadata != nil {
+		input.Metadata = dummyPutInput.Metadata
+		input.MetadataDirective = "REPLACE"
+	}
+	if dummyPutInput.CacheControl != nil {
+		input.CacheControl = dummyPutInput.CacheControl
+		input.MetadataDirective = "REPLACE"
+	}
+	if dummyPutInput.ContentEncoding != nil {
+		input.ContentEncoding = dummyPutInput.ContentEncoding
+		input.MetadataDirective = "REPLACE"
+	}
+
+	_, err := c.client.CopyObject(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to copy object from %s/%s to %s/%s: %w", srcBucket, srcKey, dstBucket, dstKey, err)
+	}
+
+	return nil
 }
 
 // deleteAllObjects deletes all objects in a bucket (for force delete)
