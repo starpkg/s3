@@ -8,6 +8,7 @@ import (
 
 	"github.com/1set/starlet"
 	"github.com/1set/starlet/dataconv"
+	"github.com/1set/starlet/dataconv/types"
 	"github.com/starpkg/base"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
@@ -30,7 +31,7 @@ type Module struct {
 func NewModule() *Module {
 	return newModuleWithOptions(
 		genConfigOption(configKeyServiceType, "Default S3 service type (aws, minio, digitalocean, etc.)", "auto"),
-		genConfigOption(configKeyAccessKey, "Default S3 access key ID", ""),
+		genSecretConfigOption(configKeyAccessKey, "Default S3 access key ID", ""),
 		genSecretConfigOption(configKeySecretKey, "Default S3 secret access key", ""),
 		genConfigOption(configKeySessionToken, "Default S3 session token", ""),
 		genConfigOption(configKeyRegion, "Default S3 region", "us-east-1"),
@@ -53,10 +54,6 @@ func genConfigOption[T any](name, description string, defaultValue T) *base.Conf
 	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(strings.ReplaceAll(name, "_", "_")))
 	// Also support AWS standard environment variables
 	switch name {
-	case configKeyAccessKey:
-		envVar = "AWS_ACCESS_KEY_ID"
-	case configKeySecretKey:
-		envVar = "AWS_SECRET_ACCESS_KEY"
 	case configKeySessionToken:
 		envVar = "AWS_SESSION_TOKEN"
 	case configKeyRegion:
@@ -72,7 +69,11 @@ func genConfigOption[T any](name, description string, defaultValue T) *base.Conf
 // genSecretConfigOption creates a secret configuration option
 func genSecretConfigOption(name, description, defaultValue string) *base.ConfigOption[string] {
 	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(strings.ReplaceAll(name, "_", "_")))
-	if name == configKeySecretKey {
+	// Also support AWS standard environment variables
+	switch name {
+	case configKeyAccessKey:
+		envVar = "AWS_ACCESS_KEY_ID"
+	case configKeySecretKey:
 		envVar = "AWS_SECRET_ACCESS_KEY"
 	}
 
@@ -133,7 +134,6 @@ func (m *Module) LoadModule() starlet.ModuleLoader {
 		"validate_bucket_name":   starlark.NewBuiltin(ModuleName+".validate_bucket_name", starValidateBucketName),
 		"validate_object_key":    starlark.NewBuiltin(ModuleName+".validate_object_key", starValidateObjectKey),
 		"get_supported_services": starlark.NewBuiltin(ModuleName+".get_supported_services", starGetSupportedServices),
-		"get_client_info":        starlark.NewBuiltin(ModuleName+".get_client_info", starGetClientInfo),
 	}
 	return m.cfgMod.LoadModule(ModuleName, additionalFuncs)
 }
@@ -147,13 +147,13 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		sessionToken   = ""
 		region         = ""
 		endpoint       = ""
-		forcePathStyle = false
-		useSSL         = true
+		forcePathStyle = types.NewNullableBool(starlark.False)
+		useSSL         = types.NewNullableBool(starlark.True)
 		timeout        = 0
 		maxRetries     = 0
 		partSize       = int64(0)
 		concurrency    = 0
-		enableLogging  = false
+		enableLogging  = types.NewNullableBool(starlark.False)
 		userAgent      = ""
 	)
 
@@ -165,16 +165,24 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		"session_token?", &sessionToken,
 		"region?", &region,
 		"endpoint?", &endpoint,
-		"force_path_style?", &forcePathStyle,
-		"use_ssl?", &useSSL,
+		"force_path_style?", forcePathStyle,
+		"use_ssl?", useSSL,
 		"timeout?", &timeout,
 		"max_retries?", &maxRetries,
 		"part_size?", &partSize,
 		"concurrency?", &concurrency,
-		"enable_logging?", &enableLogging,
+		"enable_logging?", enableLogging,
 		"user_agent?", &userAgent,
 	); err != nil {
 		return none, err
+	}
+
+	// Helper function to get boolean config value
+	getBoolConfigValue := func(moduleDefault bool, nullableOverride *types.NullableBool) bool {
+		if !nullableOverride.IsNull() {
+			return bool(nullableOverride.Value())
+		}
+		return moduleDefault
 	}
 
 	// Get configuration values from module, using provided values as overrides
@@ -185,13 +193,13 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		SessionToken:   getConfigValue(m.ext.GetString(configKeySessionToken), sessionToken),
 		Region:         getConfigValue(m.ext.GetString(configKeyRegion), region),
 		Endpoint:       getConfigValue(m.ext.GetString(configKeyEndpoint), endpoint),
-		ForcePathStyle: getSimpleBoolConfigValue(m.ext.GetBool(configKeyForcePathStyle), forcePathStyle),
-		UseSSL:         getSimpleBoolConfigValue(m.ext.GetBool(configKeyUseSSL), useSSL),
+		ForcePathStyle: getBoolConfigValue(m.ext.GetBool(configKeyForcePathStyle), forcePathStyle),
+		UseSSL:         getBoolConfigValue(m.ext.GetBool(configKeyUseSSL), useSSL),
 		Timeout:        getIntConfigValue(m.ext.GetInt(configKeyTimeout), timeout),
 		MaxRetries:     getIntConfigValue(m.ext.GetInt(configKeyMaxRetries), maxRetries),
 		PartSize:       getInt64ConfigValue(int64(m.ext.GetInt(configKeyPartSize)), partSize),
 		Concurrency:    getIntConfigValue(m.ext.GetInt(configKeyConcurrency), concurrency),
-		EnableLogging:  getSimpleBoolConfigValue(m.ext.GetBool(configKeyEnableLogging), enableLogging),
+		EnableLogging:  getBoolConfigValue(m.ext.GetBool(configKeyEnableLogging), enableLogging),
 		UserAgent:      getConfigValue(m.ext.GetString(configKeyUserAgent), userAgent),
 	}
 
@@ -226,12 +234,6 @@ func getBoolConfigValueDirect(moduleDefault bool, override bool, hasOverride boo
 	if hasOverride {
 		return override
 	}
-	return moduleDefault
-}
-
-func getSimpleBoolConfigValue(moduleDefault bool, override bool) bool {
-	// For simplicity, let's prefer the module default unless override differs significantly
-	// This isn't perfect but works for most cases
 	return moduleDefault
 }
 
@@ -427,11 +429,9 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 
 	// Handle metadata
 	if metadata.Len() > 0 {
-		metadataMap := make(map[string]string)
-		for _, item := range metadata.Items() {
-			key := item[0].(starlark.String).GoString()
-			value := item[1].(starlark.String).GoString()
-			metadataMap[key] = value
+		metadataMap, err := convertMetadataDict(metadata)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
 		options = append(options, WithMetadata(metadataMap))
 	}
@@ -486,11 +486,9 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 
 	// Handle metadata
 	if metadata.Len() > 0 {
-		metadataMap := make(map[string]string)
-		for _, item := range metadata.Items() {
-			key := item[0].(starlark.String).GoString()
-			value := item[1].(starlark.String).GoString()
-			metadataMap[key] = value
+		metadataMap, err := convertMetadataDict(metadata)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
 		options = append(options, WithMetadata(metadataMap))
 	}
@@ -670,13 +668,19 @@ func (s *S3ClientStruct) getObjectInfo(thread *starlark.Thread, b *starlark.Buil
 	return dataconv.Marshal(info)
 }
 
-// setObjectInfo sets metadata and tags for an object
+// setObjectInfo sets metadata and other object properties for an object
 func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
-		bucket   = ""
-		key      = ""
-		metadata = starlark.NewDict(0)
-		tags     = starlark.NewDict(0)
+		bucket             = ""
+		key                = ""
+		metadata           = starlark.NewDict(0)
+		tags               = starlark.NewDict(0)
+		contentType        = ""
+		cacheControl       = ""
+		contentEncoding    = ""
+		contentDisposition = ""
+		contentLanguage    = ""
+		expires            = ""
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
@@ -684,34 +688,77 @@ func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Buil
 		"key", &key,
 		"metadata?", &metadata,
 		"tags?", &tags,
+		"content_type?", &contentType,
+		"cache_control?", &cacheControl,
+		"content_encoding?", &contentEncoding,
+		"content_disposition?", &contentDisposition,
+		"content_language?", &contentLanguage,
+		"expires?", &expires,
 	); err != nil {
 		return none, err
 	}
 
-	// Convert metadata
-	var metadataMap map[string]string
+	// Build options
+	var options []SetObjectInfoOption
+
+	// Handle metadata
 	if metadata.Len() > 0 {
-		metadataMap = make(map[string]string)
+		metadataMap := make(map[string]string)
 		for _, item := range metadata.Items() {
 			key := item[0].(starlark.String).GoString()
 			value := item[1].(starlark.String).GoString()
 			metadataMap[key] = value
 		}
+		options = append(options, WithObjectMetadata(metadataMap))
 	}
 
-	// Convert tags
-	var tagsMap map[string]string
+	// Handle tags
 	if tags.Len() > 0 {
-		tagsMap = make(map[string]string)
+		tagsMap := make(map[string]string)
 		for _, item := range tags.Items() {
 			key := item[0].(starlark.String).GoString()
 			value := item[1].(starlark.String).GoString()
 			tagsMap[key] = value
 		}
+		options = append(options, WithObjectTags(tagsMap))
+	}
+
+	// Handle content type
+	if contentType != "" {
+		options = append(options, WithObjectContentType(contentType))
+	}
+
+	// Handle cache control
+	if cacheControl != "" {
+		options = append(options, WithObjectCacheControl(cacheControl))
+	}
+
+	// Handle content encoding
+	if contentEncoding != "" {
+		options = append(options, WithObjectContentEncoding(contentEncoding))
+	}
+
+	// Handle content disposition
+	if contentDisposition != "" {
+		options = append(options, WithObjectContentDisposition(contentDisposition))
+	}
+
+	// Handle content language
+	if contentLanguage != "" {
+		options = append(options, WithObjectContentLanguage(contentLanguage))
+	}
+
+	// Handle expires
+	if expires != "" {
+		expiresTime, err := convertStarlarkStringToTime(expires)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert expires time: %w", err)
+		}
+		options = append(options, WithObjectExpires(expiresTime))
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.SetObjectInfo(ctx, bucket, key, metadataMap, tagsMap)
+	err := s.client.SetObjectInfo(ctx, bucket, key, options...)
 	if err != nil {
 		return none, fmt.Errorf("failed to set object info: %w", err)
 	}
@@ -762,11 +809,9 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 
 	// Handle metadata
 	if metadata.Len() > 0 {
-		metadataMap := make(map[string]string)
-		for _, item := range metadata.Items() {
-			key := item[0].(starlark.String).GoString()
-			value := item[1].(starlark.String).GoString()
-			metadataMap[key] = value
+		metadataMap, err := convertMetadataDict(metadata)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
 		options = append(options, WithMetadata(metadataMap))
 	}
@@ -794,9 +839,13 @@ func starParseS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.
 		return none, err
 	}
 
+	// Detect service type from URL pattern
+	serviceType := detectServiceTypeFromURL(urlStr)
+
 	result := map[string]string{
-		"bucket": bucket,
-		"key":    key,
+		"bucket":       bucket,
+		"key":          key,
+		"service_type": serviceType,
 	}
 	return dataconv.Marshal(result)
 }
@@ -824,49 +873,27 @@ func starGenerateS3URL(thread *starlark.Thread, b *starlark.Builtin, args starla
 // starGetPublicURL generates a public HTTP URL for an object
 func starGetPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
-		clientVal starlark.Value
-		bucket    string
-		key       string
+		bucket      string
+		key         string
+		region      = "us-east-1"
+		endpoint    = ""
+		useSSL      = true
+		serviceType = "aws"
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"client", &clientVal,
 		"bucket", &bucket,
 		"key", &key,
+		"region?", &region,
+		"endpoint?", &endpoint,
+		"use_ssl?", &useSSL,
+		"service_type?", &serviceType,
 	); err != nil {
 		return none, err
 	}
 
-	// Extract client from Starlark struct
-	clientStruct, ok := clientVal.(*starlarkstruct.Struct)
-	if !ok {
-		return none, fmt.Errorf("invalid client type")
-	}
-
-	// Get the get_config method and call it to get config info
-	getConfigMethod, err := clientStruct.Attr("get_config")
-	if err != nil {
-		return none, fmt.Errorf("client does not have get_config method")
-	}
-
-	configVal, err := starlark.Call(thread, getConfigMethod, starlark.Tuple{}, nil)
-	if err != nil {
-		return none, fmt.Errorf("failed to get client config: %w", err)
-	}
-
-	// Extract config to determine service type and region
-	configData, err := dataconv.Unmarshal(configVal)
-	if err != nil {
-		return none, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	config, ok := configData.(*ClientConfig)
-	if !ok {
-		return none, fmt.Errorf("invalid client config type")
-	}
-
-	// Generate public URL using the config
-	url := getPublicURL(bucket, key, config.Region, config.Endpoint, config.UseSSL)
+	// Generate public URL using the provided parameters
+	url := getPublicURL(bucket, key, region, endpoint, useSSL, serviceType)
 	return starlark.String(url), nil
 }
 
@@ -900,35 +927,4 @@ func starGetSupportedServices(thread *starlark.Thread, b *starlark.Builtin, args
 
 	services := getSupportedServices()
 	return dataconv.Marshal(services)
-}
-
-// starGetClientInfo returns information about an S3 client
-func starGetClientInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var clientVal starlark.Value
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "client", &clientVal); err != nil {
-		return none, err
-	}
-
-	// Extract client from Starlark struct
-	clientStruct, ok := clientVal.(*starlarkstruct.Struct)
-	if !ok {
-		return none, fmt.Errorf("invalid client type")
-	}
-
-	// Get the underlying S3ClientStruct from the Starlark struct
-	// We need to access the S3ClientStruct that created this struct
-	// Since we can't directly access it, we'll check if this is our S3Client struct type
-	if clientStruct.Constructor().String() != "S3Client" {
-		return none, fmt.Errorf("not an S3 client")
-	}
-
-	// For now, we'll return a generic client info message
-	// In a real implementation, we'd need a way to access the underlying client
-	configMap := map[string]interface{}{
-		"type":        "S3Client",
-		"status":      "connected",
-		"description": "S3-compatible storage client",
-	}
-
-	return dataconv.Marshal(configMap)
 }

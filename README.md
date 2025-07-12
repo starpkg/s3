@@ -6,17 +6,20 @@
 
 **Universal S3-compatible storage operations for Starlark scripts - seamlessly connect to any S3 service!**
 
-The S3 module provides a comprehensive, easy-to-use interface for interacting with S3-compatible storage services from Starlark scripts. It supports Amazon S3, MinIO, DigitalOcean Spaces, Cloudflare R2, and many other S3-compatible services.
+The S3 module provides a comprehensive, easy-to-use interface for interacting with S3-compatible storage services from Starlark scripts. It supports Amazon S3, MinIO, DigitalOcean Spaces, Cloudflare R2, and many other S3-compatible services with advanced features like file operations, metadata management, and multi-provider URL handling.
 
 ## ✨ Features
 
 - **🌐 Universal Compatibility**: Works with AWS S3, MinIO, DigitalOcean Spaces, Cloudflare R2, and other S3-compatible services
-- **🔒 Secure Authentication**: Supports multiple authentication methods including IAM, access keys, and session tokens
-- **🪣 Bucket Operations**: Create, delete, list, and manage buckets with proper validation
-- **📁 Object Operations**: Upload, download, delete, and list objects with metadata support
-- **🛠️ Utility Functions**: URL parsing, bucket name validation, and service configuration helpers
+- **🔒 Secure Configuration**: Module-level configuration with secret handling and environment variable support
+- **🪣 Advanced Bucket Operations**: Create, delete, list, and get comprehensive bucket information
+- **📁 Enhanced Object Operations**: Upload, download, delete, list, copy, and manage object metadata and properties
+- **📂 Direct File Operations**: Upload and download files directly from filesystem for better performance
+- **🏷️ Metadata & Tags**: Full support for object metadata, tags, content-type, cache-control, and more
+- **🔗 Smart URL Handling**: Multi-provider URL parsing and generation with automatic service detection
+- **🛠️ Rich Utility Functions**: Bucket validation, object key validation, and service configuration helpers
 - **⚡ High Performance**: Built on AWS SDK v2 with configurable concurrency and retry policies
-- **🔍 Smart Configuration**: Auto-detection of service types and intelligent default settings
+- **🔍 Intelligent Configuration**: Auto-detection of service types, environment variable integration, and smart defaults
 - **🎯 Starlark Native**: Designed specifically for Starlark with proper error handling and type safety
 
 ## 🚀 Quick Start
@@ -51,6 +54,47 @@ for obj in objects["contents"]:
     print(obj["key"], obj["size"])
 ```
 
+### File Operations
+
+```python
+# Upload a file directly from filesystem
+client.put_object_file(
+    "my-bucket", 
+    "data/backup.zip", 
+    "/local/path/backup.zip",
+    content_type="application/zip"
+)
+
+# Download a file directly to filesystem
+client.get_object_file("my-bucket", "data/backup.zip", "/local/path/downloaded.zip")
+```
+
+### Enhanced Object Management
+
+```python
+# Set comprehensive object properties
+client.set_object_info(
+    "my-bucket",
+    "document.pdf",
+    content_type="application/pdf",
+    cache_control="max-age=3600",
+    content_encoding="gzip",
+    content_disposition="attachment; filename=document.pdf",
+    content_language="en-US",
+    expires="2024-12-31T23:59:59Z",
+    metadata={"author": "John Doe", "version": "1.0"},
+    tags={"project": "alpha", "department": "engineering"}
+)
+
+# Copy objects with metadata changes
+client.copy_object(
+    "source-bucket", "source/file.txt",
+    "dest-bucket", "destination/file.txt",
+    content_type="text/plain",
+    metadata={"copied": "true"}
+)
+```
+
 ### MinIO Example
 
 ```python
@@ -65,29 +109,43 @@ client = create_client(
     use_ssl=False,
 )
 
-# Check if bucket exists
-if not client.bucket_exists("test-bucket"):
-    client.create_bucket("test-bucket")
-
-# Upload with metadata
-client.put_object(
-    "test-bucket", 
-    "data.json", 
-    '{"message": "Hello from Starlark!"}',
-    content_type="application/json",
-    metadata={"source": "starlark-script"}
-)
+# Get comprehensive bucket information
+bucket_info = client.get_bucket_info("test-bucket")
+print(f"Bucket: {bucket_info['name']}")
+print(f"Region: {bucket_info['region']}")
+print(f"Created: {bucket_info['creation_date']}")
+print(f"Versioning: {bucket_info['versioning_status']}")
+print(f"Object count: {bucket_info['object_count']}")
+print(f"Total size: {bucket_info['total_size']} bytes")
 ```
 
 ## 🔧 Configuration
+
+### Module-Level Configuration
+
+The S3 module supports module-level configuration with environment variable integration:
+
+```python
+# Environment variables are automatically detected:
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_DEFAULT_REGION
+# S3_SERVICE_TYPE, S3_ENDPOINT, S3_USE_SSL, etc.
+
+# Create client using module defaults + overrides
+client = create_client(
+    # Only specify what you want to override
+    service_type="aws",
+    region="eu-west-1"
+    # access_key and secret_key can come from environment
+)
+```
 
 ### Client Configuration Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `service_type` | string | `"auto"` | S3 service type (aws, minio, digitalocean, etc.) |
-| `access_key` | string | `""` | S3 access key ID |
-| `secret_key` | string | `""` | S3 secret access key |
+| `access_key` | string | `""` | S3 access key ID (secret) |
+| `secret_key` | string | `""` | S3 secret access key (secret) |
 | `session_token` | string | `""` | S3 session token (for temporary credentials) |
 | `region` | string | `"us-east-1"` | S3 region |
 | `endpoint` | string | `""` | Custom S3 endpoint URL |
@@ -102,7 +160,7 @@ client.put_object(
 
 ### Supported Services
 
-The module supports these S3-compatible services:
+The module supports these S3-compatible services with automatic endpoint detection:
 
 - **AWS S3** (`service_type="aws"`)
 - **MinIO** (`service_type="minio"`)
@@ -162,24 +220,47 @@ Checks if a bucket exists.
 **Returns:**
 - Boolean indicating if bucket exists
 
-#### `client.get_bucket_location(bucket)`
-Gets the location/region of a bucket.
+#### `client.get_bucket_info(bucket)`
+Gets comprehensive information about a bucket.
 
 **Parameters:**
 - `bucket` (string): Bucket name
 
 **Returns:**
-- String containing bucket region
+- Dictionary containing detailed bucket information:
+  - `name` (string): Bucket name
+  - `region` (string): Bucket region
+  - `creation_date` (string): Creation timestamp
+  - `versioning_status` (string): Versioning configuration
+  - `public_access_blocked` (bool): Public access block status
+  - `has_policy` (bool): Whether bucket has a policy
+  - `encryption_enabled` (bool): Whether encryption is enabled
+  - `object_count` (int): Number of objects in bucket
+  - `total_size` (int): Total size of all objects in bytes
 
 ### Object Operations
 
-#### `client.put_object(bucket, key, body, **kwargs)`
+#### `client.put_object(bucket, key, content, **kwargs)`
 Uploads an object to S3.
 
 **Parameters:**
 - `bucket` (string): Bucket name
 - `key` (string): Object key
-- `body` (string): Object content
+- `content` (string): Object content
+- `content_type` (string, optional): MIME type
+- `metadata` (dict, optional): Object metadata
+- `tags` (dict, optional): Object tags
+- `cache_control` (string, optional): Cache control header
+- `content_encoding` (string, optional): Content encoding
+- `expires` (string, optional): Expiration date (RFC3339 format)
+
+#### `client.put_object_file(bucket, key, file_path, **kwargs)`
+Uploads a file directly from filesystem to S3.
+
+**Parameters:**
+- `bucket` (string): Bucket name
+- `key` (string): Object key
+- `file_path` (string): Local file path to upload
 - `content_type` (string, optional): MIME type
 - `metadata` (dict, optional): Object metadata
 - `cache_control` (string, optional): Cache control header
@@ -194,6 +275,14 @@ Downloads an object from S3.
 
 **Returns:**
 - String containing object content
+
+#### `client.get_object_file(bucket, key, file_path)`
+Downloads an object from S3 directly to filesystem.
+
+**Parameters:**
+- `bucket` (string): Bucket name
+- `key` (string): Object key
+- `file_path` (string): Local file path to save to
 
 #### `client.delete_object(bucket, key)`
 Deletes an object from S3.
@@ -210,7 +299,6 @@ Lists objects in a bucket.
 - `prefix` (string, optional): Object key prefix
 - `delimiter` (string, optional): Delimiter for grouping
 - `max_keys` (int, optional): Maximum number of keys to return
-- `continuation_token` (string, optional): Pagination token
 
 **Returns:**
 - Dictionary containing object list and metadata
@@ -235,16 +323,47 @@ Gets metadata about an object.
 **Returns:**
 - Dictionary containing object metadata
 
+#### `client.set_object_info(bucket, key, **kwargs)`
+Sets comprehensive properties for an object by copying it with new metadata.
+
+**Parameters:**
+- `bucket` (string): Bucket name
+- `key` (string): Object key
+- `metadata` (dict, optional): Object metadata
+- `tags` (dict, optional): Object tags
+- `content_type` (string, optional): MIME type
+- `cache_control` (string, optional): Cache control header
+- `content_encoding` (string, optional): Content encoding
+- `content_disposition` (string, optional): Content disposition header
+- `content_language` (string, optional): Content language
+- `expires` (string, optional): Expiration date (RFC3339 format)
+
+#### `client.copy_object(src_bucket, src_key, dst_bucket, dst_key, **kwargs)`
+Copies an object from one location to another.
+
+**Parameters:**
+- `src_bucket` (string): Source bucket name
+- `src_key` (string): Source object key
+- `dst_bucket` (string): Destination bucket name
+- `dst_key` (string): Destination object key
+- `content_type` (string, optional): New MIME type
+- `metadata` (dict, optional): New object metadata
+- `cache_control` (string, optional): New cache control header
+- `content_encoding` (string, optional): New content encoding
+
 ### Utility Functions
 
 #### `parse_s3_url(url)`
-Parses an S3 URL into bucket and key components.
+Parses an S3 URL into bucket and key components with automatic service detection.
 
 **Parameters:**
 - `url` (string): S3 URL (s3://, http://, or https://)
 
 **Returns:**
-- Dictionary with `bucket` and `key` fields
+- Dictionary with fields:
+  - `bucket` (string): Bucket name
+  - `key` (string): Object key
+  - `service_type` (string): Detected service type
 
 #### `generate_s3_url(bucket, key)`
 Generates a standard S3 URL.
@@ -255,6 +374,20 @@ Generates a standard S3 URL.
 
 **Returns:**
 - String containing S3 URL
+
+#### `get_public_url(bucket, key, region="us-east-1", endpoint="", use_ssl=True, service_type="aws")`
+Generates a public HTTP URL for an object with multi-provider support.
+
+**Parameters:**
+- `bucket` (string): Bucket name
+- `key` (string): Object key
+- `region` (string, optional): S3 region
+- `endpoint` (string, optional): Custom endpoint
+- `use_ssl` (bool, optional): Use HTTPS
+- `service_type` (string, optional): Service type for URL format
+
+**Returns:**
+- String containing public URL
 
 #### `validate_bucket_name(name)`
 Validates an S3 bucket name.
@@ -321,10 +454,10 @@ r2_client = create_client(
 )
 ```
 
-### Advanced Usage
+### Advanced Usage with File Operations
 
 ```python
-load("s3", "create_client", "parse_s3_url", "validate_bucket_name")
+load("s3", "create_client", "parse_s3_url", "validate_bucket_name", "get_public_url")
 
 # Create client with custom configuration
 client = create_client(
@@ -345,47 +478,102 @@ if validate_bucket_name(bucket_name):
     if not client.bucket_exists(bucket_name):
         client.create_bucket(bucket_name, region="eu-west-1")
         print(f"Created bucket: {bucket_name}")
+
+        # Get comprehensive bucket information
+        bucket_info = client.get_bucket_info(bucket_name)
+        print(f"Bucket created in region: {bucket_info['region']}")
+        print(f"Versioning: {bucket_info['versioning_status']}")
     else:
         print(f"Bucket already exists: {bucket_name}")
 else:
     print(f"Invalid bucket name: {bucket_name}")
 
-# Upload file with metadata
-client.put_object(
+# Upload file with comprehensive metadata
+client.put_object_file(
     bucket_name,
     "documents/important.pdf",
-    file_content,
+    "/local/path/document.pdf",
     content_type="application/pdf",
     metadata={
         "author": "John Doe",
         "department": "Engineering",
         "classification": "internal",
-    },
-    cache_control="max-age=3600",
+    }
 )
 
-# Parse S3 URLs
+# Set additional object properties
+client.set_object_info(
+    bucket_name,
+    "documents/important.pdf",
+    cache_control="max-age=3600",
+    content_disposition="attachment; filename=important.pdf",
+    content_language="en-US",
+    expires="2024-12-31T23:59:59Z",
+    tags={"project": "alpha", "sensitive": "true"}
+)
+
+# Copy object with metadata changes
+client.copy_object(
+    bucket_name, "documents/important.pdf",
+    bucket_name, "archive/important-backup.pdf",
+    metadata={"archived": "true", "backup_date": "2024-01-15"}
+)
+
+# Parse and generate URLs with service detection
 s3_url = "s3://my-bucket/path/to/file.txt"
 parsed = parse_s3_url(s3_url)
-print(f"Bucket: {parsed['bucket']}, Key: {parsed['key']}")
+print(f"Bucket: {parsed['bucket']}, Key: {parsed['key']}, Service: {parsed['service_type']}")
 
-# List objects with pagination
-continuation_token = None
-while True:
-    result = client.list_objects(
-        bucket_name,
-        prefix="documents/",
-        max_keys=100,
-        continuation_token=continuation_token,
+# Generate public URL for Cloudflare R2
+public_url = get_public_url(
+    "my-bucket", "documents/public.pdf",
+    service_type="cloudflare",
+    endpoint="account.r2.cloudflarestorage.com"
+)
+print(f"Public URL: {public_url}")
+
+# Download file directly to filesystem
+client.get_object_file(bucket_name, "documents/important.pdf", "/local/download/document.pdf")
+```
+
+### Multi-Provider URL Handling
+
+```python
+load("s3", "parse_s3_url", "get_public_url")
+
+# Parse various provider URLs
+urls = [
+    "https://bucket.s3.amazonaws.com/file.txt",
+    "https://bucket.nyc3.digitaloceanspaces.com/file.txt", 
+    "https://account.r2.cloudflarestorage.com/bucket/file.txt",
+    "https://localhost:9000/bucket/file.txt"
+]
+
+for url in urls:
+    parsed = parse_s3_url(url)
+    print(f"URL: {url}")
+    print(f"  Service: {parsed['service_type']}")
+    print(f"  Bucket: {parsed['bucket']}")
+    print(f"  Key: {parsed['key']}")
+    print()
+
+# Generate URLs for different providers
+providers = [
+    {"service": "aws", "region": "us-west-2"},
+    {"service": "digitalocean", "region": "nyc3"},
+    {"service": "cloudflare", "endpoint": "account.r2.cloudflarestorage.com"},
+    {"service": "minio", "endpoint": "localhost:9000", "use_ssl": False}
+]
+
+for provider in providers:
+    url = get_public_url(
+        "my-bucket", "data/file.txt",
+        service_type=provider["service"],
+        region=provider.get("region", "auto"),
+        endpoint=provider.get("endpoint", ""),
+        use_ssl=provider.get("use_ssl", True)
     )
-    
-    for obj in result["contents"]:
-        print(f"Object: {obj['key']} ({obj['size']} bytes)")
-    
-    if not result["is_truncated"]:
-        break
-    
-    continuation_token = result.get("next_marker")
+    print(f"{provider['service']}: {url}")
 ```
 
 ### Error Handling
@@ -406,9 +594,18 @@ def safe_s3_operation():
         client.create_bucket("my-test-bucket")
         print("Bucket created successfully")
         
-        # Try to upload object
-        client.put_object("my-test-bucket", "test.txt", "Hello World")
+        # Try to upload object with metadata
+        client.put_object(
+            "my-test-bucket", "test.txt", "Hello World",
+            content_type="text/plain",
+            metadata={"uploaded_by": "starlark"}
+        )
         print("Object uploaded successfully")
+        
+        # Get object info
+        info = client.get_object_info("my-test-bucket", "test.txt")
+        print(f"Object size: {info['size']} bytes")
+        print(f"Content type: {info['content_type']}")
         
     except Exception as e:
         print(f"S3 operation failed: {e}")
@@ -435,8 +632,9 @@ The test suite includes:
 - Client creation and configuration tests
 - Utility function tests
 - API method availability tests
-- URL parsing tests
+- URL parsing tests for multiple providers
 - Bucket and object operation interface tests
+- Service type detection tests
 
 ## 📄 License
 

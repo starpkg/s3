@@ -269,8 +269,54 @@ test_object_operations()
 	}
 }
 
+func TestS3EnhancedObjectOperations(t *testing.T) {
+	// Test enhanced object operations including file operations, set_object_info, and copy_object
+	script := `
+load("s3", "create_client")
+
+def test_enhanced_object_operations():
+    # Create a client (will fail actual operations without credentials)
+    client = create_client(
+        service_type="minio",
+        endpoint="localhost:9000",
+        use_ssl=False,
+        access_key="minioadmin",
+        secret_key="minioadmin",
+    )
+
+    # Test enhanced object methods exist
+    if not hasattr(client, "put_object_file"):
+        fail("put_object_file method not found")
+
+    if not hasattr(client, "get_object_file"):
+        fail("get_object_file method not found")
+
+    if not hasattr(client, "set_object_info"):
+        fail("set_object_info method not found")
+
+    if not hasattr(client, "copy_object"):
+        fail("copy_object method not found")
+
+    print("All enhanced object operation methods are available!")
+
+test_enhanced_object_operations()
+`
+
+	// Run the script
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	if err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
 func TestS3URLParsing(t *testing.T) {
-	// Test different URL formats
+	// Test different URL formats with service detection
 	script := `
 load("s3", "parse_s3_url")
 
@@ -289,6 +335,8 @@ def test_url_parsing():
     result = parse_s3_url("https://my-bucket.s3.amazonaws.com/path/to/file.txt")
     if result["bucket"] != "my-bucket" or result["key"] != "path/to/file.txt":
         fail("HTTPS virtual-hosted URL parsing failed")
+    if result["service_type"] != "aws":
+        fail("AWS service type detection failed")
 
     # Test HTTPS URL (path style)
     result = parse_s3_url("https://s3.amazonaws.com/my-bucket/path/to/file.txt")
@@ -298,6 +346,186 @@ def test_url_parsing():
     print("All URL parsing tests passed!")
 
 test_url_parsing()
+`
+
+	// Run the script
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	if err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
+func TestS3MultiProviderURLParsing(t *testing.T) {
+	// Test URL parsing for various S3-compatible providers
+	script := `
+load("s3", "parse_s3_url")
+
+def test_multi_provider_url_parsing():
+    # Test DigitalOcean Spaces
+    result = parse_s3_url("https://my-bucket.nyc3.digitaloceanspaces.com/file.txt")
+    if result["bucket"] != "my-bucket" or result["service_type"] != "digitalocean":
+        fail("DigitalOcean Spaces URL parsing failed")
+
+    # Test Cloudflare R2
+    result = parse_s3_url("https://account-id.r2.cloudflarestorage.com/my-bucket/file.txt")
+    if result["bucket"] != "my-bucket" or result["service_type"] != "cloudflare":
+        fail("Cloudflare R2 URL parsing failed")
+
+    # Test MinIO (localhost)
+    result = parse_s3_url("http://localhost:9000/my-bucket/file.txt")
+    if result["bucket"] != "my-bucket" or result["service_type"] != "minio":
+        fail("MinIO URL parsing failed")
+
+    # Test Wasabi
+    result = parse_s3_url("https://s3.us-east-1.wasabisys.com/my-bucket/file.txt")
+    if result["bucket"] != "my-bucket" or result["service_type"] != "wasabi":
+        fail("Wasabi URL parsing failed")
+
+    # Test Google Cloud Storage
+    result = parse_s3_url("https://storage.googleapis.com/my-bucket/file.txt")
+    if result["bucket"] != "my-bucket" or result["service_type"] != "google":
+        fail("Google Cloud Storage URL parsing failed")
+
+    print("All multi-provider URL parsing tests passed!")
+
+test_multi_provider_url_parsing()
+`
+
+	// Run the script
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	if err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
+func TestS3PublicURLGeneration(t *testing.T) {
+	// Test public URL generation with service type support
+	script := `
+load("s3", "get_public_url")
+
+def test_public_url_generation():
+    # Test AWS S3 URL generation
+    url = get_public_url("my-bucket", "file.txt", service_type="aws", region="us-west-2")
+    if "amazonaws.com" not in url:
+        fail("AWS URL generation failed")
+
+    # Test DigitalOcean Spaces URL generation
+    url = get_public_url("my-bucket", "file.txt", service_type="digitalocean", region="nyc3")
+    if "digitaloceanspaces.com" not in url:
+        fail("DigitalOcean URL generation failed")
+
+    # Test custom endpoint
+    url = get_public_url("my-bucket", "file.txt", endpoint="localhost:9000", use_ssl=False)
+    if not url.startswith("http://localhost:9000"):
+        fail("Custom endpoint URL generation failed")
+
+    # Test MinIO service type
+    url = get_public_url("my-bucket", "file.txt", service_type="minio")
+    if "localhost:9000" not in url:
+        fail("MinIO URL generation failed")
+
+    print("All public URL generation tests passed!")
+
+test_public_url_generation()
+`
+
+	// Run the script
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	if err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
+func TestS3ModuleLevelConfiguration(t *testing.T) {
+	// Test module-level configuration features
+	script := `
+load("s3", "create_client")
+
+def test_module_configuration():
+    # Test creating client with minimal parameters (relies on module defaults)
+    client1 = create_client()
+    if client1 == None:
+        fail("Failed to create client with module defaults")
+
+    # Test creating client with some overrides
+    client2 = create_client(service_type="minio", region="us-west-1")
+    if client2 == None:
+        fail("Failed to create client with partial overrides")
+
+    # Test boolean parameter handling with nullable types
+    client3 = create_client(use_ssl=False, force_path_style=True)
+    if client3 == None:
+        fail("Failed to create client with boolean overrides")
+
+    print("Module-level configuration test passed!")
+
+test_module_configuration()
+`
+
+	// Run the script
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	if err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
+func TestS3ValidationFunctions(t *testing.T) {
+	// Test validation functions with edge cases
+	script := `
+load("s3", "validate_bucket_name", "validate_object_key")
+
+def test_validation_functions():
+    # Test valid bucket names
+    valid_names = ["my-bucket", "test123", "bucket-with-dots.example", "a" * 3, "a" * 63]
+    for name in valid_names:
+        if not validate_bucket_name(name):
+            fail("Valid bucket name rejected: " + name)
+
+    # Test invalid bucket names
+    invalid_names = ["My-Bucket", "bucket_with_underscores", "ab", "a" * 64, "192.168.1.1", "xn--example", "bucket-s3alias"]
+    for name in invalid_names:
+        if validate_bucket_name(name):
+            fail("Invalid bucket name accepted: " + name)
+
+    # Test valid object keys
+    valid_keys = ["file.txt", "path/to/file.txt", "a" * 1024, "file with spaces.txt"]
+    for key in valid_keys:
+        if not validate_object_key(key):
+            fail("Valid object key rejected: " + key)
+
+    # Test invalid object keys
+    invalid_keys = ["", "a" * 1025]  # Empty and too long
+    for key in invalid_keys:
+        if validate_object_key(key):
+            fail("Invalid object key accepted: " + key)
+
+    print("All validation function tests passed!")
+
+test_validation_functions()
 `
 
 	// Run the script

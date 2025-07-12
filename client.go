@@ -199,6 +199,11 @@ func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInf
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// Initialize bucket info
+	bucketInfo := &BucketInfo{
+		Name: bucket,
+	}
+
 	// Get bucket location
 	locationResult, err := c.client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
 		Bucket: aws.String(bucket),
@@ -212,27 +217,63 @@ func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInf
 	if region == "" {
 		region = "us-east-1"
 	}
+	bucketInfo.Region = region
 
-	// Get bucket creation date from list buckets (we need to find our bucket)
+	// Get bucket creation date from list buckets (gracefully handle errors)
 	listResult, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list buckets: %w", err)
-	}
-
-	var bucketInfo *BucketInfo
-	for _, b := range listResult.Buckets {
-		if aws.ToString(b.Name) == bucket {
-			bucketInfo = &BucketInfo{
-				Name:         bucket,
-				Region:       region,
-				CreationDate: aws.ToTime(b.CreationDate),
+	if err == nil {
+		for _, b := range listResult.Buckets {
+			if aws.ToString(b.Name) == bucket {
+				bucketInfo.CreationDate = aws.ToTime(b.CreationDate)
+				break
 			}
-			break
 		}
 	}
+	// If ListBuckets fails, we don't treat it as an error - just leave CreationDate as zero value
 
-	if bucketInfo == nil {
-		return nil, fmt.Errorf("bucket %s not found", bucket)
+	// Get bucket versioning status
+	versioningResult, err := c.client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{
+		Bucket: aws.String(bucket),
+	})
+	if err == nil {
+		bucketInfo.VersioningStatus = string(versioningResult.Status)
+	}
+
+	// Get public access block settings
+	publicAccessResult, err := c.client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
+		Bucket: aws.String(bucket),
+	})
+	if err == nil && publicAccessResult.PublicAccessBlockConfiguration != nil {
+		config := publicAccessResult.PublicAccessBlockConfiguration
+		bucketInfo.PublicAccessBlocked = aws.ToBool(config.BlockPublicAcls) &&
+			aws.ToBool(config.BlockPublicPolicy) &&
+			aws.ToBool(config.IgnorePublicAcls) &&
+			aws.ToBool(config.RestrictPublicBuckets)
+	}
+
+	// Check if bucket has a policy
+	_, err = c.client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{
+		Bucket: aws.String(bucket),
+	})
+	bucketInfo.HasPolicy = err == nil
+
+	// Get bucket encryption
+	_, err = c.client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{
+		Bucket: aws.String(bucket),
+	})
+	bucketInfo.EncryptionEnabled = err == nil
+
+	// Get object count and total size (approximate)
+	objectsResult, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+	})
+	if err == nil {
+		bucketInfo.ObjectCount = int64(len(objectsResult.Contents))
+		totalSize := int64(0)
+		for _, obj := range objectsResult.Contents {
+			totalSize += aws.ToInt64(obj.Size)
+		}
+		bucketInfo.TotalSize = totalSize
 	}
 
 	return bucketInfo, nil
@@ -441,21 +482,26 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 	}, nil
 }
 
-// SetObjectInfo sets metadata and tags for an object by copying it with new metadata
-func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, metadata map[string]string, tags map[string]string) error {
+// SetObjectInfo sets metadata and other object properties by copying it with new settings
+func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, options ...SetObjectInfoOption) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Copy object to itself with new metadata
+	// Copy object to itself with new metadata/settings
 	input := &s3.CopyObjectInput{
 		Bucket:     aws.String(bucket),
 		Key:        aws.String(key),
 		CopySource: aws.String(bucket + "/" + key),
-		Metadata:   metadata,
 	}
 
 	// Set metadata directive to replace existing metadata
 	input.MetadataDirective = "REPLACE"
+
+	// Apply all options
+	var tags map[string]string
+	for _, opt := range options {
+		tags = opt(input, tags)
+	}
 
 	_, err := c.client.CopyObject(ctx, input)
 	if err != nil {
@@ -485,6 +531,78 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, metada
 	}
 
 	return nil
+}
+
+// SetObjectInfoOption configures SetObjectInfo operations
+type SetObjectInfoOption func(*s3.CopyObjectInput, map[string]string) map[string]string
+
+// WithObjectMetadata sets metadata for SetObjectInfo
+func WithObjectMetadata(metadata map[string]string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.Metadata = metadata
+		return tags
+	}
+}
+
+// WithObjectTags sets tags for SetObjectInfo
+func WithObjectTags(newTags map[string]string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		if tags == nil {
+			tags = make(map[string]string)
+		}
+		for k, v := range newTags {
+			tags[k] = v
+		}
+		return tags
+	}
+}
+
+// WithObjectContentType sets content type for SetObjectInfo
+func WithObjectContentType(contentType string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.ContentType = aws.String(contentType)
+		return tags
+	}
+}
+
+// WithObjectCacheControl sets cache control for SetObjectInfo
+func WithObjectCacheControl(cacheControl string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.CacheControl = aws.String(cacheControl)
+		return tags
+	}
+}
+
+// WithObjectContentEncoding sets content encoding for SetObjectInfo
+func WithObjectContentEncoding(encoding string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.ContentEncoding = aws.String(encoding)
+		return tags
+	}
+}
+
+// WithObjectContentDisposition sets content disposition for SetObjectInfo
+func WithObjectContentDisposition(disposition string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.ContentDisposition = aws.String(disposition)
+		return tags
+	}
+}
+
+// WithObjectContentLanguage sets content language for SetObjectInfo
+func WithObjectContentLanguage(language string) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.ContentLanguage = aws.String(language)
+		return tags
+	}
+}
+
+// WithObjectExpires sets expires header for SetObjectInfo
+func WithObjectExpires(expires time.Time) SetObjectInfoOption {
+	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
+		input.Expires = &expires
+		return tags
+	}
 }
 
 // CopyObject copies an object from one location to another
@@ -578,9 +696,15 @@ func (c *S3Client) deleteAllObjects(ctx context.Context, bucket string) error {
 
 // BucketInfo represents information about a bucket
 type BucketInfo struct {
-	Name         string    `json:"name"`
-	CreationDate time.Time `json:"creation_date"`
-	Region       string    `json:"region,omitempty"`
+	Name                string    `json:"name"`
+	CreationDate        time.Time `json:"creation_date,omitempty"`
+	Region              string    `json:"region,omitempty"`
+	VersioningStatus    string    `json:"versioning_status,omitempty"`
+	PublicAccessBlocked bool      `json:"public_access_blocked,omitempty"`
+	HasPolicy           bool      `json:"has_policy,omitempty"`
+	EncryptionEnabled   bool      `json:"encryption_enabled,omitempty"`
+	ObjectCount         int64     `json:"object_count,omitempty"`
+	TotalSize           int64     `json:"total_size,omitempty"`
 }
 
 // ObjectInfo represents information about an object
