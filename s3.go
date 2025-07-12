@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/1set/starlet"
 	"github.com/1set/starlet/dataconv"
@@ -277,6 +278,7 @@ func (s *S3ClientStruct) Struct() *starlarkstruct.Struct {
 		"get_object_info": starlark.NewBuiltin("s3.get_object_info", s.getObjectInfo),
 		"set_object_info": starlark.NewBuiltin("s3.set_object_info", s.setObjectInfo),
 		"copy_object":     starlark.NewBuiltin("s3.copy_object", s.copyObject),
+		"presign_url":     starlark.NewBuiltin("s3.presign_url", s.presignURL),
 	})
 }
 
@@ -698,67 +700,40 @@ func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Buil
 		return none, err
 	}
 
-	// Build options
-	var options []SetObjectInfoOption
-
-	// Handle metadata
+	// Convert metadata
+	var metadataMap map[string]string
 	if metadata.Len() > 0 {
-		metadataMap := make(map[string]string)
+		metadataMap = make(map[string]string)
 		for _, item := range metadata.Items() {
 			key := item[0].(starlark.String).GoString()
 			value := item[1].(starlark.String).GoString()
 			metadataMap[key] = value
 		}
-		options = append(options, WithObjectMetadata(metadataMap))
 	}
 
-	// Handle tags
+	// Convert tags
+	var tagsMap map[string]string
 	if tags.Len() > 0 {
-		tagsMap := make(map[string]string)
+		tagsMap = make(map[string]string)
 		for _, item := range tags.Items() {
 			key := item[0].(starlark.String).GoString()
 			value := item[1].(starlark.String).GoString()
 			tagsMap[key] = value
 		}
-		options = append(options, WithObjectTags(tagsMap))
 	}
 
-	// Handle content type
-	if contentType != "" {
-		options = append(options, WithObjectContentType(contentType))
-	}
-
-	// Handle cache control
-	if cacheControl != "" {
-		options = append(options, WithObjectCacheControl(cacheControl))
-	}
-
-	// Handle content encoding
-	if contentEncoding != "" {
-		options = append(options, WithObjectContentEncoding(contentEncoding))
-	}
-
-	// Handle content disposition
-	if contentDisposition != "" {
-		options = append(options, WithObjectContentDisposition(contentDisposition))
-	}
-
-	// Handle content language
-	if contentLanguage != "" {
-		options = append(options, WithObjectContentLanguage(contentLanguage))
-	}
-
-	// Handle expires
+	// Convert expires
+	var expiresTime *time.Time
 	if expires != "" {
-		expiresTime, err := convertStarlarkStringToTime(expires)
+		convertedTime, err := convertStarlarkStringToTime(expires)
 		if err != nil {
 			return none, fmt.Errorf("failed to convert expires time: %w", err)
 		}
-		options = append(options, WithObjectExpires(expiresTime))
+		expiresTime = &convertedTime
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.SetObjectInfo(ctx, bucket, key, options...)
+	err := s.client.SetObjectInfo(ctx, bucket, key, metadataMap, tagsMap, contentType, cacheControl, contentEncoding, contentDisposition, contentLanguage, expiresTime)
 	if err != nil {
 		return none, fmt.Errorf("failed to set object info: %w", err)
 	}
@@ -825,6 +800,33 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 	return none, nil
 }
 
+// presignURL generates a pre-signed URL for temporary access to an object
+func (s *S3ClientStruct) presignURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		bucket    = ""
+		key       = ""
+		expiresIn = 3600  // Default: 1 hour
+		method    = "GET" // Default: GET
+	)
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"bucket", &bucket,
+		"key", &key,
+		"expires_in?", &expiresIn,
+		"method?", &method,
+	); err != nil {
+		return none, err
+	}
+
+	ctx := dataconv.GetThreadContext(thread)
+	url, err := s.client.PresignURL(ctx, bucket, key, expiresIn, method)
+	if err != nil {
+		return none, fmt.Errorf("failed to generate presigned URL: %w", err)
+	}
+
+	return starlark.String(url), nil
+}
+
 // Utility functions for Starlark
 
 // starParseS3URL parses an S3 URL into bucket and key components
@@ -834,18 +836,16 @@ func starParseS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.
 		return none, err
 	}
 
-	bucket, key, err := parseS3URL(urlStr)
+	// Use the enhanced provider system for parsing
+	bucket, key, detectedProvider, err := ParseURLWithProvider(urlStr, "")
 	if err != nil {
 		return none, err
 	}
 
-	// Detect service type from URL pattern
-	serviceType := detectServiceTypeFromURL(urlStr)
-
 	result := map[string]string{
 		"bucket":       bucket,
 		"key":          key,
-		"service_type": serviceType,
+		"service_type": detectedProvider,
 	}
 	return dataconv.Marshal(result)
 }

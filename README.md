@@ -52,6 +52,10 @@ print(content)  # "Hello, World!"
 objects = client.list_objects("my-bucket")
 for obj in objects["contents"]:
     print(obj["key"], obj["size"])
+
+# Generate a temporary download link
+download_url = client.presign_url("my-bucket", "hello.txt", expires_in=3600)
+print(f"Temporary download URL: {download_url}")
 ```
 
 ### File Operations
@@ -162,19 +166,112 @@ client = create_client(
 
 The module supports these S3-compatible services with automatic endpoint detection:
 
-- **AWS S3** (`service_type="aws"`)
-- **MinIO** (`service_type="minio"`)
-- **DigitalOcean Spaces** (`service_type="digitalocean"`)
-- **Linode Object Storage** (`service_type="linode"`)
-- **Wasabi** (`service_type="wasabi"`)
-- **Backblaze B2** (`service_type="backblaze"`)
-- **Cloudflare R2** (`service_type="cloudflare"`)
-- **Scaleway** (`service_type="scaleway"`)
-- **Alibaba Cloud OSS** (`service_type="alibaba"`)
-- **Google Cloud Storage** (`service_type="google"`)
-- **Oracle Cloud** (`service_type="oracle"`)
-- **IBM Cloud** (`service_type="ibm"`)
-- **Custom** (`service_type="custom"`)
+| Service | Provider Constant | Service Type String | Default Region | Description |
+|---------|------------------|-------------------|---------------|-------------|
+| Amazon S3 | `ProviderAWS` | `"aws"` | `us-east-1` | AWS Simple Storage Service |
+| MinIO | `ProviderMinIO` | `"minio"` | `us-east-1` | High Performance Object Storage |
+| DigitalOcean Spaces | `ProviderDigitalOcean` | `"digitalocean"` | `nyc3` | DigitalOcean's object storage |
+| Linode Object Storage | `ProviderLinode` | `"linode"` | `us-east-1` | Linode's S3-compatible storage |
+| Wasabi Hot Storage | `ProviderWasabi` | `"wasabi"` | `us-east-1` | Low-cost cloud storage |
+| Backblaze B2 | `ProviderBackblaze` | `"backblaze"` | `us-west-000` | Backblaze B2 Cloud Storage |
+| Cloudflare R2 | `ProviderCloudflare` | `"cloudflare"` | `auto` | Cloudflare R2 Storage |
+| Scaleway Object Storage | `ProviderScaleway` | `"scaleway"` | `fr-par` | Scaleway's object storage |
+| Alibaba Cloud OSS | `ProviderAlibaba` | `"alibaba"` | `oss-cn-hangzhou` | Alibaba Cloud Object Storage |
+| Google Cloud Storage | `ProviderGoogle` | `"google"` | `us-central1` | Google Cloud Storage |
+| Oracle Cloud | `ProviderOracle` | `"oracle"` | `us-ashburn-1` | Oracle Cloud Infrastructure |
+| IBM Cloud | `ProviderIBM` | `"ibm"` | `us-south` | IBM Cloud Object Storage |
+| Custom Provider | `ProviderCustom` | `"custom"` | `us-east-1` | Generic S3-compatible service |
+
+### Provider Integration Process
+
+To add support for a new S3-compatible service provider, follow these steps:
+
+#### 1. Add Provider Constants
+Define a new provider constant in `provider.go`:
+
+```go
+const (
+    // ... existing providers ...
+    ProviderNewService = "newservice"
+)
+```
+
+#### 2. Configure Provider Settings
+Add a new provider configuration in the `providerConfigs` map:
+
+```go
+ProviderNewService: {
+    Name:                  ProviderNewService,
+    DisplayName:           "New S3 Service",
+    DefaultRegion:         "us-east-1",
+    DefaultPort:           "443",
+    ForcePathStyle:        false,
+    URLStyle:              URLStyleVirtualHosted, // or URLStylePath, URLStyleBoth
+    EndpointPattern:       "s3.{region}.newservice.com",
+    SupportsVirtualHosted: true,
+    SupportsPathStyle:     false,
+    
+    // URL patterns for parsing service URLs
+    URLPatterns: []URLPattern{
+        {
+            Pattern:   regexp.MustCompile(`^https?://[^/]+\.s3\.[^/]+\.newservice\.com/`),
+            ParseFunc: parseVirtualHostedURL,
+        },
+        {
+            Pattern:   regexp.MustCompile(`^https?://s3\.[^/]+\.newservice\.com/`),
+            ParseFunc: parsePathStyleURL,
+        },
+    },
+    
+    // URL generation function
+    GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
+        return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.newservice.com", false)
+    },
+},
+```
+
+#### 3. Test Integration
+Create test cases to verify URL parsing and generation:
+
+```go
+// Test URL parsing
+testCases := []struct {
+    url      string
+    provider string
+    bucket   string
+    key      string
+}{
+    {
+        url:      "https://bucket.s3.region.newservice.com/file.txt",
+        provider: "newservice",
+        bucket:   "bucket", 
+        key:      "file.txt",
+    },
+}
+```
+
+#### 4. Update Documentation
+Add the new provider to the supported services table above and create usage examples.
+
+#### Integration Requirements
+
+For successful integration, a new provider must implement:
+
+- **URL Pattern Recognition**: Regex patterns to identify and parse provider-specific URLs
+- **Endpoint Generation**: Logic to generate correct endpoint URLs based on region and configuration
+- **Authentication Support**: Compatible with AWS SDK v2 authentication mechanisms
+- **Standard S3 API**: Support for core S3 operations (bucket and object management)
+
+#### Provider-Specific Features
+
+Some providers may have unique features or limitations:
+
+- **Cloudflare R2**: Requires account ID in endpoint pattern
+- **Oracle Cloud**: Requires namespace in endpoint pattern  
+- **Google Cloud Storage**: Uses path-style addressing only
+- **MinIO**: Typically uses custom endpoints and path-style addressing
+
+Example implementation can be found in the existing provider configurations in `provider.go`.
 
 ## 📚 API Reference
 
@@ -350,6 +447,41 @@ Copies an object from one location to another.
 - `metadata` (dict, optional): New object metadata
 - `cache_control` (string, optional): New cache control header
 - `content_encoding` (string, optional): New content encoding
+
+#### `client.presign_url(bucket, key, expires_in=3600, method="GET")`
+Generates a pre-signed URL for temporary access to an object.
+
+**Purpose**: Creates a temporary URL that allows access to private objects without requiring AWS credentials. Useful for sharing files securely or enabling direct browser uploads/downloads.
+
+**Parameters:**
+- `bucket` (string): Bucket name
+- `key` (string): Object key
+- `expires_in` (int, optional): URL expiration time in seconds. Default: `3600` (1 hour)
+- `method` (string, optional): HTTP method for the URL. Supported: `"GET"`, `"HEAD"`. Default: `"GET"`
+
+**Returns:**
+- String containing the pre-signed URL
+
+**Examples:**
+```python
+# Generate a GET URL valid for 1 hour (default)
+download_url = client.presign_url("my-bucket", "private/document.pdf")
+
+# Generate a GET URL valid for 24 hours
+long_url = client.presign_url("my-bucket", "files/data.csv", expires_in=86400)
+
+# Generate a HEAD URL for metadata access only
+metadata_url = client.presign_url("my-bucket", "info.json", method="HEAD", expires_in=1800)
+
+print(f"Share this URL: {download_url}")
+# Anyone with this URL can download the file for the next hour
+```
+
+**Security Notes:**
+- Pre-signed URLs contain embedded credentials and should be treated as sensitive
+- URLs are only valid for the specified time period
+- Anyone with the URL can access the object using the specified method
+- Consider using shorter expiration times for sensitive content
 
 ### Utility Functions
 
@@ -534,6 +666,18 @@ print(f"Public URL: {public_url}")
 
 # Download file directly to filesystem
 client.get_object_file(bucket_name, "documents/important.pdf", "/local/download/document.pdf")
+
+# Generate pre-signed URLs for secure sharing
+download_url = client.presign_url(bucket_name, "documents/important.pdf", expires_in=3600)
+print(f"Temporary download URL (1 hour): {download_url}")
+
+# Generate long-term pre-signed URL for public sharing  
+share_url = client.presign_url(bucket_name, "documents/public-report.pdf", expires_in=604800)  # 7 days
+print(f"Share this URL (valid for 7 days): {share_url}")
+
+# Generate metadata-only access URL
+metadata_url = client.presign_url(bucket_name, "documents/info.json", method="HEAD", expires_in=1800)
+print(f"Metadata access URL (30 minutes): {metadata_url}")
 ```
 
 ### Multi-Provider URL Handling

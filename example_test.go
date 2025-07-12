@@ -540,3 +540,53 @@ test_validation_functions()
 		t.Fatalf("Script execution failed: %v", err)
 	}
 }
+
+func TestS3PresignURL(t *testing.T) {
+	// Test presign URL functionality
+	script := `
+load("s3", "create_client")
+
+def test_presign_url():
+    # Create a client (presigning doesn't require actual credentials to work)
+    client = create_client(
+        service_type="aws",
+        region="us-west-2",
+        access_key="test-key", 
+        secret_key="test-secret"
+    )
+
+    # Test presign_url method exists
+    if not hasattr(client, "presign_url"):
+        fail("presign_url method not found")
+
+    # Test that presign_url method can be called (may fail due to credentials but method should exist)
+    get_url = ""
+    try_presign = True
+    
+    if try_presign:
+        # The method will likely fail due to invalid credentials, but that's expected
+        # We just want to verify the method exists and has the right signature
+        get_url = client.presign_url("test-bucket", "test-file.txt")
+        print("✓ GET presigned URL generated successfully: " + get_url[:50] + "...")
+    
+    # Test HEAD method presigning 
+    head_url = client.presign_url("test-bucket", "test-file.txt", expires_in=7200, method="HEAD")
+    print("✓ HEAD presigned URL generated successfully: " + head_url[:50] + "...")
+
+    print("Presign URL functionality test completed!")
+
+test_presign_url()
+`
+
+	// Run the script
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	if err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}

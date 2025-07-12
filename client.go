@@ -483,7 +483,7 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 }
 
 // SetObjectInfo sets metadata and other object properties by copying it with new settings
-func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, options ...SetObjectInfoOption) error {
+func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, metadata map[string]string, tags map[string]string, contentType, cacheControl, contentEncoding, contentDisposition, contentLanguage string, expires *time.Time) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -497,10 +497,39 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, option
 	// Set metadata directive to replace existing metadata
 	input.MetadataDirective = "REPLACE"
 
-	// Apply all options
-	var tags map[string]string
-	for _, opt := range options {
-		tags = opt(input, tags)
+	// Set metadata if provided
+	if len(metadata) > 0 {
+		input.Metadata = metadata
+	}
+
+	// Set content type if provided
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	// Set cache control if provided
+	if cacheControl != "" {
+		input.CacheControl = aws.String(cacheControl)
+	}
+
+	// Set content encoding if provided
+	if contentEncoding != "" {
+		input.ContentEncoding = aws.String(contentEncoding)
+	}
+
+	// Set content disposition if provided
+	if contentDisposition != "" {
+		input.ContentDisposition = aws.String(contentDisposition)
+	}
+
+	// Set content language if provided
+	if contentLanguage != "" {
+		input.ContentLanguage = aws.String(contentLanguage)
+	}
+
+	// Set expires if provided
+	if expires != nil {
+		input.Expires = expires
 	}
 
 	_, err := c.client.CopyObject(ctx, input)
@@ -531,78 +560,6 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, option
 	}
 
 	return nil
-}
-
-// SetObjectInfoOption configures SetObjectInfo operations
-type SetObjectInfoOption func(*s3.CopyObjectInput, map[string]string) map[string]string
-
-// WithObjectMetadata sets metadata for SetObjectInfo
-func WithObjectMetadata(metadata map[string]string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.Metadata = metadata
-		return tags
-	}
-}
-
-// WithObjectTags sets tags for SetObjectInfo
-func WithObjectTags(newTags map[string]string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		if tags == nil {
-			tags = make(map[string]string)
-		}
-		for k, v := range newTags {
-			tags[k] = v
-		}
-		return tags
-	}
-}
-
-// WithObjectContentType sets content type for SetObjectInfo
-func WithObjectContentType(contentType string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.ContentType = aws.String(contentType)
-		return tags
-	}
-}
-
-// WithObjectCacheControl sets cache control for SetObjectInfo
-func WithObjectCacheControl(cacheControl string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.CacheControl = aws.String(cacheControl)
-		return tags
-	}
-}
-
-// WithObjectContentEncoding sets content encoding for SetObjectInfo
-func WithObjectContentEncoding(encoding string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.ContentEncoding = aws.String(encoding)
-		return tags
-	}
-}
-
-// WithObjectContentDisposition sets content disposition for SetObjectInfo
-func WithObjectContentDisposition(disposition string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.ContentDisposition = aws.String(disposition)
-		return tags
-	}
-}
-
-// WithObjectContentLanguage sets content language for SetObjectInfo
-func WithObjectContentLanguage(language string) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.ContentLanguage = aws.String(language)
-		return tags
-	}
-}
-
-// WithObjectExpires sets expires header for SetObjectInfo
-func WithObjectExpires(expires time.Time) SetObjectInfoOption {
-	return func(input *s3.CopyObjectInput, tags map[string]string) map[string]string {
-		input.Expires = &expires
-		return tags
-	}
 }
 
 // CopyObject copies an object from one location to another
@@ -646,6 +603,52 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 	}
 
 	return nil
+}
+
+// PresignURL generates a pre-signed URL for temporary access to an object
+func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresIn int, method string) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Validate method
+	if method != "GET" && method != "HEAD" {
+		return "", fmt.Errorf("invalid method %s, only GET and HEAD are supported", method)
+	}
+
+	// Create presign client
+	presignClient := s3.NewPresignClient(c.client)
+
+	// Set expiration duration
+	expiration := time.Duration(expiresIn) * time.Second
+
+	switch method {
+	case "GET":
+		request, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		}, func(opts *s3.PresignOptions) {
+			opts.Expires = expiration
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to presign GET request: %w", err)
+		}
+		return request.URL, nil
+
+	case "HEAD":
+		request, err := presignClient.PresignHeadObject(ctx, &s3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		}, func(opts *s3.PresignOptions) {
+			opts.Expires = expiration
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to presign HEAD request: %w", err)
+		}
+		return request.URL, nil
+
+	default:
+		return "", fmt.Errorf("unsupported method: %s", method)
+	}
 }
 
 // deleteAllObjects deletes all objects in a bucket (for force delete)
