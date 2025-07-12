@@ -732,8 +732,43 @@ func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Buil
 		expiresTime = &convertedTime
 	}
 
+	// Build options using private unified option system
+	var options []*objectOption
+
+	if len(metadataMap) > 0 {
+		options = append(options, withMetadata(metadataMap))
+	}
+
+	if len(tagsMap) > 0 {
+		options = append(options, withTags(tagsMap))
+	}
+
+	if contentType != "" {
+		options = append(options, withContentType(contentType))
+	}
+
+	if cacheControl != "" {
+		options = append(options, withCacheControl(cacheControl))
+	}
+
+	if contentEncoding != "" {
+		options = append(options, withContentEncoding(contentEncoding))
+	}
+
+	if contentDisposition != "" {
+		options = append(options, withContentDisposition(contentDisposition))
+	}
+
+	if contentLanguage != "" {
+		options = append(options, withContentLanguage(contentLanguage))
+	}
+
+	if expiresTime != nil {
+		options = append(options, withExpires(expiresTime))
+	}
+
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.SetObjectInfo(ctx, bucket, key, metadataMap, tagsMap, contentType, cacheControl, contentEncoding, contentDisposition, contentLanguage, expiresTime)
+	err := s.client.SetObjectInfo(ctx, bucket, key, options...)
 	if err != nil {
 		return none, fmt.Errorf("failed to set object info: %w", err)
 	}

@@ -483,7 +483,7 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 }
 
 // SetObjectInfo sets metadata and other object properties by copying it with new settings
-func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, metadata map[string]string, tags map[string]string, contentType, cacheControl, contentEncoding, contentDisposition, contentLanguage string, expires *time.Time) error {
+func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, options ...*objectOption) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -497,39 +497,17 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, metada
 	// Set metadata directive to replace existing metadata
 	input.MetadataDirective = "REPLACE"
 
-	// Set metadata if provided
-	if len(metadata) > 0 {
-		input.Metadata = metadata
-	}
+	// Track if we need to set tags separately
+	var tags map[string]string
 
-	// Set content type if provided
-	if contentType != "" {
-		input.ContentType = aws.String(contentType)
-	}
-
-	// Set cache control if provided
-	if cacheControl != "" {
-		input.CacheControl = aws.String(cacheControl)
-	}
-
-	// Set content encoding if provided
-	if contentEncoding != "" {
-		input.ContentEncoding = aws.String(contentEncoding)
-	}
-
-	// Set content disposition if provided
-	if contentDisposition != "" {
-		input.ContentDisposition = aws.String(contentDisposition)
-	}
-
-	// Set content language if provided
-	if contentLanguage != "" {
-		input.ContentLanguage = aws.String(contentLanguage)
-	}
-
-	// Set expires if provided
-	if expires != nil {
-		input.Expires = expires
+	// Apply options
+	for _, opt := range options {
+		if opt != nil {
+			opt.applyToCopyObjectInput(input)
+			if len(opt.tags) > 0 {
+				tags = opt.tags
+			}
+		}
 	}
 
 	_, err := c.client.CopyObject(ctx, input)
@@ -573,28 +551,21 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 		CopySource: aws.String(srcBucket + "/" + srcKey),
 	}
 
-	// Create a dummy PutObjectInput to apply options, then transfer relevant fields
-	dummyPutInput := &s3.PutObjectInput{}
+	// Convert PutObjectOptions to unified options and apply them
 	for _, opt := range options {
+		// Create a dummy PutObjectInput to extract option values
+		dummyPutInput := &s3.PutObjectInput{}
 		opt(dummyPutInput)
-	}
 
-	// Transfer applicable fields from PutObjectInput to CopyObjectInput
-	if dummyPutInput.ContentType != nil {
-		input.ContentType = dummyPutInput.ContentType
-		input.MetadataDirective = "REPLACE"
-	}
-	if dummyPutInput.Metadata != nil {
-		input.Metadata = dummyPutInput.Metadata
-		input.MetadataDirective = "REPLACE"
-	}
-	if dummyPutInput.CacheControl != nil {
-		input.CacheControl = dummyPutInput.CacheControl
-		input.MetadataDirective = "REPLACE"
-	}
-	if dummyPutInput.ContentEncoding != nil {
-		input.ContentEncoding = dummyPutInput.ContentEncoding
-		input.MetadataDirective = "REPLACE"
+		// Convert to unified option and apply
+		unifiedOpt := &objectOption{
+			contentType:     dummyPutInput.ContentType,
+			metadata:        dummyPutInput.Metadata,
+			cacheControl:    dummyPutInput.CacheControl,
+			contentEncoding: dummyPutInput.ContentEncoding,
+		}
+
+		unifiedOpt.applyToCopyObjectInput(input)
 	}
 
 	_, err := c.client.CopyObject(ctx, input)
@@ -732,6 +703,134 @@ type ListObjectsResult struct {
 }
 
 // Option types for methods
+
+// objectOption is a private unified option type for object operations
+type objectOption struct {
+	contentType        *string
+	metadata           map[string]string
+	tags               map[string]string
+	cacheControl       *string
+	contentEncoding    *string
+	contentDisposition *string
+	contentLanguage    *string
+	expires            *time.Time
+}
+
+// applyToPutObjectInput applies the option to a PutObjectInput
+func (o *objectOption) applyToPutObjectInput(input *s3.PutObjectInput) {
+	if o.contentType != nil {
+		input.ContentType = o.contentType
+	}
+	if len(o.metadata) > 0 {
+		input.Metadata = o.metadata
+	}
+	if o.cacheControl != nil {
+		input.CacheControl = o.cacheControl
+	}
+	if o.contentEncoding != nil {
+		input.ContentEncoding = o.contentEncoding
+	}
+	if o.contentDisposition != nil {
+		input.ContentDisposition = o.contentDisposition
+	}
+	if o.contentLanguage != nil {
+		input.ContentLanguage = o.contentLanguage
+	}
+	if o.expires != nil {
+		input.Expires = o.expires
+	}
+}
+
+// applyToCopyObjectInput applies the option to a CopyObjectInput
+func (o *objectOption) applyToCopyObjectInput(input *s3.CopyObjectInput) {
+	if o.contentType != nil {
+		input.ContentType = o.contentType
+		input.MetadataDirective = "REPLACE"
+	}
+	if len(o.metadata) > 0 {
+		input.Metadata = o.metadata
+		input.MetadataDirective = "REPLACE"
+	}
+	if o.cacheControl != nil {
+		input.CacheControl = o.cacheControl
+		input.MetadataDirective = "REPLACE"
+	}
+	if o.contentEncoding != nil {
+		input.ContentEncoding = o.contentEncoding
+		input.MetadataDirective = "REPLACE"
+	}
+	if o.contentDisposition != nil {
+		input.ContentDisposition = o.contentDisposition
+		input.MetadataDirective = "REPLACE"
+	}
+	if o.contentLanguage != nil {
+		input.ContentLanguage = o.contentLanguage
+		input.MetadataDirective = "REPLACE"
+	}
+	if o.expires != nil {
+		input.Expires = o.expires
+		input.MetadataDirective = "REPLACE"
+	}
+}
+
+// Private option builder functions
+
+// withContentType sets the content type
+func withContentType(contentType string) *objectOption {
+	if contentType == "" {
+		return &objectOption{}
+	}
+	return &objectOption{contentType: aws.String(contentType)}
+}
+
+// withMetadata sets metadata
+func withMetadata(metadata map[string]string) *objectOption {
+	return &objectOption{metadata: metadata}
+}
+
+// withTags sets tags
+func withTags(tags map[string]string) *objectOption {
+	return &objectOption{tags: tags}
+}
+
+// withCacheControl sets cache control
+func withCacheControl(cacheControl string) *objectOption {
+	if cacheControl == "" {
+		return &objectOption{}
+	}
+	return &objectOption{cacheControl: aws.String(cacheControl)}
+}
+
+// withContentEncoding sets content encoding
+func withContentEncoding(contentEncoding string) *objectOption {
+	if contentEncoding == "" {
+		return &objectOption{}
+	}
+	return &objectOption{contentEncoding: aws.String(contentEncoding)}
+}
+
+// withContentDisposition sets content disposition
+func withContentDisposition(contentDisposition string) *objectOption {
+	if contentDisposition == "" {
+		return &objectOption{}
+	}
+	return &objectOption{contentDisposition: aws.String(contentDisposition)}
+}
+
+// withContentLanguage sets content language
+func withContentLanguage(contentLanguage string) *objectOption {
+	if contentLanguage == "" {
+		return &objectOption{}
+	}
+	return &objectOption{contentLanguage: aws.String(contentLanguage)}
+}
+
+// withExpires sets expiration
+func withExpires(expires *time.Time) *objectOption {
+	return &objectOption{expires: expires}
+}
+
+// Public option types for backward compatibility
 
 // PutObjectOption configures PutObject operations
 type PutObjectOption func(*s3.PutObjectInput)
