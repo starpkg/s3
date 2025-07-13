@@ -88,28 +88,26 @@ func (c *ClientConfig) ValidateConfig() error {
 // detectServiceType attempts to detect the service type from the endpoint
 func (c *ClientConfig) detectServiceType() string {
 	if c.Endpoint == "" {
-		return ProviderAWS
+		// Default to Custom when no endpoint is specified
+		config := GetProviderConfig(ProviderCustom)
+		if config != nil {
+			return config.GetServiceType()
+		}
+		return "aws_s3"
 	}
 
 	// Use the unified provider system to detect service type
 	testURL := "https://" + c.Endpoint + "/test"
 	detectedProvider := DetectProviderFromURL(testURL)
 
-	// Map provider names to service types for backward compatibility
-	switch detectedProvider {
-	case ProviderAWS:
-		return "aws_s3"
-	case ProviderCloudflare:
-		return "cloudflare_r2"
-	case ProviderBackblaze:
-		return "backblaze_b2"
-	case ProviderDigitalOcean:
-		return "digitalocean_spaces"
-	case ProviderMinIO:
-		return "minio"
-	default:
-		return "aws_s3"
+	// Get the provider config and return its service type
+	config := GetProviderConfig(detectedProvider)
+	if config != nil {
+		return config.GetServiceType()
 	}
+
+	// Fallback to Custom if provider config not found
+	return "aws_s3"
 }
 
 // contains checks if a string contains a substring
@@ -140,38 +138,4 @@ func indexOf(str, substr string) int {
 // GetTimeout returns the timeout as a time.Duration
 func (c *ClientConfig) GetTimeout() time.Duration {
 	return time.Duration(c.Timeout) * time.Second
-}
-
-// GetEndpointURL returns the endpoint URL, generating one if not set
-func (c *ClientConfig) GetEndpointURL() string {
-	if c.Endpoint != "" {
-		return c.Endpoint
-	}
-
-	// Map service type to provider for unified handling
-	var provider string
-	switch c.ServiceType {
-	case "aws_s3":
-		provider = ProviderAWS
-	case "cloudflare_r2":
-		provider = ProviderCloudflare
-	case "digitalocean_spaces":
-		provider = ProviderDigitalOcean
-	case "backblaze_b2":
-		provider = ProviderBackblaze
-	case "minio":
-		provider = ProviderMinIO
-	default:
-		provider = ProviderAWS
-	}
-
-	// Use the unified provider system to generate endpoint URL
-	config := GetProviderConfig(provider)
-	if config == nil {
-		return ""
-	}
-
-	// Generate URL using the provider's GenerateURL function
-	// For endpoint generation, we use empty bucket/key and let the provider handle it
-	return config.GenerateURL("", "", c.Region, c.Endpoint, c.UseSSL)
 }

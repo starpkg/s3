@@ -415,18 +415,12 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 	contentReader := strings.NewReader(content)
 
 	// Build options
-	var options []*objectOption
-
-	if contentType != "" {
-		options = append(options, withContentType(contentType))
-	}
-
-	if contentEncoding != "" {
-		options = append(options, withContentEncoding(contentEncoding))
-	}
-
-	if cacheControl != "" {
-		options = append(options, withCacheControl(cacheControl))
+	option := &ObjectOptions{
+		ContentType:     contentType,
+		ContentEncoding: contentEncoding,
+		CacheControl:    cacheControl,
+		Metadata:        make(map[string]string),
+		Tags:            make(map[string]string),
 	}
 
 	// Handle metadata
@@ -435,7 +429,31 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		options = append(options, withMetadata(metadataMap))
+		option.Metadata = metadataMap
+	}
+
+	// Handle tags
+	if tags.Len() > 0 {
+		tagsMap, err := convertMetadataDict(tags)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert tags: %w", err)
+		}
+		option.Tags = tagsMap
+	}
+
+	// Handle expires
+	if expires != "" {
+		convertedTime, err := convertStarlarkStringToTime(expires)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert expires time: %w", err)
+		}
+		option.Expires = &convertedTime
+	}
+
+	var options []*ObjectOptions
+	if option.ContentType != "" || option.ContentEncoding != "" || option.CacheControl != "" ||
+		len(option.Metadata) > 0 || len(option.Tags) > 0 || option.Expires != nil {
+		options = append(options, option)
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
@@ -472,18 +490,11 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 	}
 
 	// Build options
-	var options []*objectOption
-
-	if contentType != "" {
-		options = append(options, withContentType(contentType))
-	}
-
-	if contentEncoding != "" {
-		options = append(options, withContentEncoding(contentEncoding))
-	}
-
-	if cacheControl != "" {
-		options = append(options, withCacheControl(cacheControl))
+	option := &ObjectOptions{
+		ContentType:     contentType,
+		ContentEncoding: contentEncoding,
+		CacheControl:    cacheControl,
+		Metadata:        make(map[string]string),
 	}
 
 	// Handle metadata
@@ -492,7 +503,12 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		options = append(options, withMetadata(metadataMap))
+		option.Metadata = metadataMap
+	}
+
+	var options []*ObjectOptions
+	if option.ContentType != "" || option.ContentEncoding != "" || option.CacheControl != "" || len(option.Metadata) > 0 {
+		options = append(options, option)
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
@@ -601,18 +617,15 @@ func (s *S3ClientStruct) listObjects(thread *starlark.Thread, b *starlark.Builti
 	}
 
 	// Build options
-	var options []ListObjectsOption
-
-	if prefix != "" {
-		options = append(options, WithPrefix(prefix))
+	option := &ListObjectsOptions{
+		Prefix:    prefix,
+		Delimiter: delimiter,
+		MaxKeys:   maxKeys,
 	}
 
-	if delimiter != "" {
-		options = append(options, WithDelimiter(delimiter))
-	}
-
-	if maxKeys > 0 {
-		options = append(options, WithMaxKeys(maxKeys))
+	var options []*ListObjectsOptions
+	if option.Prefix != "" || option.Delimiter != "" || option.MaxKeys > 0 {
+		options = append(options, option)
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
@@ -732,39 +745,23 @@ func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Buil
 		expiresTime = &convertedTime
 	}
 
-	// Build options using private unified option system
-	var options []*objectOption
-
-	if len(metadataMap) > 0 {
-		options = append(options, withMetadata(metadataMap))
+	// Build options using the new ObjectOption struct
+	option := &ObjectOptions{
+		ContentType:        contentType,
+		Metadata:           metadataMap,
+		Tags:               tagsMap,
+		CacheControl:       cacheControl,
+		ContentEncoding:    contentEncoding,
+		ContentDisposition: contentDisposition,
+		ContentLanguage:    contentLanguage,
+		Expires:            expiresTime,
 	}
 
-	if len(tagsMap) > 0 {
-		options = append(options, withTags(tagsMap))
-	}
-
-	if contentType != "" {
-		options = append(options, withContentType(contentType))
-	}
-
-	if cacheControl != "" {
-		options = append(options, withCacheControl(cacheControl))
-	}
-
-	if contentEncoding != "" {
-		options = append(options, withContentEncoding(contentEncoding))
-	}
-
-	if contentDisposition != "" {
-		options = append(options, withContentDisposition(contentDisposition))
-	}
-
-	if contentLanguage != "" {
-		options = append(options, withContentLanguage(contentLanguage))
-	}
-
-	if expiresTime != nil {
-		options = append(options, withExpires(expiresTime))
+	var options []*ObjectOptions
+	if option.ContentType != "" || len(option.Metadata) > 0 || len(option.Tags) > 0 ||
+		option.CacheControl != "" || option.ContentEncoding != "" || option.ContentDisposition != "" ||
+		option.ContentLanguage != "" || option.Expires != nil {
+		options = append(options, option)
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
@@ -803,18 +800,11 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 	}
 
 	// Build options
-	var options []*objectOption
-
-	if contentType != "" {
-		options = append(options, withContentType(contentType))
-	}
-
-	if contentEncoding != "" {
-		options = append(options, withContentEncoding(contentEncoding))
-	}
-
-	if cacheControl != "" {
-		options = append(options, withCacheControl(cacheControl))
+	option := &ObjectOptions{
+		ContentType:     contentType,
+		ContentEncoding: contentEncoding,
+		CacheControl:    cacheControl,
+		Metadata:        make(map[string]string),
 	}
 
 	// Handle metadata
@@ -823,7 +813,12 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		options = append(options, withMetadata(metadataMap))
+		option.Metadata = metadataMap
+	}
+
+	var options []*ObjectOptions
+	if option.ContentType != "" || option.ContentEncoding != "" || option.CacheControl != "" || len(option.Metadata) > 0 {
+		options = append(options, option)
 	}
 
 	ctx := dataconv.GetThreadContext(thread)

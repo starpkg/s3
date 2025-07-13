@@ -227,18 +227,3 @@ func convertOptionalBool(b bool, hasValue bool) *bool {
 	}
 	return &b
 }
-
-// detectServiceTypeFromURL detects the S3-compatible service type from URL patterns
-func detectServiceTypeFromURL(s3URL string) string {
-	if s3URL == "" {
-		return ProviderCustom
-	}
-
-	// s3:// URLs don't contain service-specific information
-	if strings.HasPrefix(s3URL, "s3://") {
-		return ProviderCustom
-	}
-
-	// Use the unified provider system
-	return DetectProviderFromURL(s3URL)
-}

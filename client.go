@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -23,40 +24,35 @@ type S3Client struct {
 	mu     sync.RWMutex
 }
 
-// NewS3Client creates a new S3 client with the given configuration
+// NewS3Client creates a new S3 client with the provided configuration
 func NewS3Client(ctx context.Context, clientConfig *ClientConfig) (*S3Client, error) {
 	if clientConfig == nil {
-		return nil, fmt.Errorf("client configuration is required")
+		return nil, fmt.Errorf("client config cannot be nil")
 	}
 
 	// Validate configuration
 	if err := clientConfig.ValidateConfig(); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, fmt.Errorf("invalid client configuration: %w", err)
 	}
 
 	// Create AWS configuration
-	awsConfig, err := createAWSConfig(ctx, clientConfig)
+	cfg, err := createAWSConfig(ctx, clientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AWS config: %w", err)
 	}
 
-	// Create S3 client
-	s3Client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
-		// Set custom endpoint if provided
-		if clientConfig.Endpoint != "" {
+	// Create S3 client with custom endpoint if provided
+	var s3Client *s3.Client
+	if clientConfig.Endpoint != "" {
+		s3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(clientConfig.Endpoint)
-		}
-
-		// Set path-style addressing if required
-		if clientConfig.ForcePathStyle {
-			o.UsePathStyle = true
-		}
-
-		// Set custom user agent
-		if clientConfig.UserAgent != "" {
-			o.AppID = clientConfig.UserAgent
-		}
-	})
+			o.UsePathStyle = clientConfig.ForcePathStyle
+		})
+	} else {
+		s3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.UsePathStyle = clientConfig.ForcePathStyle
+		})
+	}
 
 	return &S3Client{
 		client: s3Client,
@@ -64,17 +60,14 @@ func NewS3Client(ctx context.Context, clientConfig *ClientConfig) (*S3Client, er
 	}, nil
 }
 
-// createAWSConfig creates AWS SDK configuration from client config
+// createAWSConfig creates the AWS configuration from client configuration
 func createAWSConfig(ctx context.Context, clientConfig *ClientConfig) (aws.Config, error) {
-	// Create configuration options
-	var opts []func(*config.LoadOptions) error
-
-	// Set region
-	if clientConfig.Region != "" {
-		opts = append(opts, config.WithRegion(clientConfig.Region))
+	// Create options for AWS config
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion(clientConfig.Region),
 	}
 
-	// Set credentials if provided
+	// Add credentials if provided
 	if clientConfig.AccessKey != "" && clientConfig.SecretKey != "" {
 		creds := credentials.NewStaticCredentialsProvider(
 			clientConfig.AccessKey,
@@ -84,12 +77,7 @@ func createAWSConfig(ctx context.Context, clientConfig *ClientConfig) (aws.Confi
 		opts = append(opts, config.WithCredentialsProvider(creds))
 	}
 
-	// Set retry configuration
-	if clientConfig.MaxRetries > 0 {
-		opts = append(opts, config.WithRetryMaxAttempts(clientConfig.MaxRetries))
-	}
-
-	// Load AWS configuration
+	// Load configuration
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("failed to load AWS config: %w", err)
@@ -105,18 +93,15 @@ func (c *S3Client) GetConfig() *ClientConfig {
 	return c.config
 }
 
-// CreateBucket creates a new bucket
+// CreateBucket creates a new S3 bucket
 func (c *S3Client) CreateBucket(ctx context.Context, bucket string, region ...string) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucket),
 	}
 
 	// Set region if provided
 	if len(region) > 0 && region[0] != "" {
-		// Only set CreateBucketConfiguration for regions other than us-east-1
+		// For regions other than us-east-1, we need to set the location constraint
 		if region[0] != "us-east-1" {
 			input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
 				LocationConstraint: types.BucketLocationConstraint(region[0]),
@@ -132,21 +117,20 @@ func (c *S3Client) CreateBucket(ctx context.Context, bucket string, region ...st
 	return nil
 }
 
-// DeleteBucket deletes a bucket
+// DeleteBucket deletes an S3 bucket
 func (c *S3Client) DeleteBucket(ctx context.Context, bucket string, force bool) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// If force is true, delete all objects first
+	// If force is true, delete all objects in the bucket first
 	if force {
 		if err := c.deleteAllObjects(ctx, bucket); err != nil {
 			return fmt.Errorf("failed to delete objects in bucket %s: %w", bucket, err)
 		}
 	}
 
-	_, err := c.client.DeleteBucket(ctx, &s3.DeleteBucketInput{
+	input := &s3.DeleteBucketInput{
 		Bucket: aws.String(bucket),
-	})
+	}
+
+	_, err := c.client.DeleteBucket(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to delete bucket %s: %w", bucket, err)
 	}
@@ -154,12 +138,11 @@ func (c *S3Client) DeleteBucket(ctx context.Context, bucket string, force bool) 
 	return nil
 }
 
-// ListBuckets lists all buckets
+// ListBuckets lists all S3 buckets
 func (c *S3Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	input := &s3.ListBucketsInput{}
 
-	result, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	result, err := c.client.ListBuckets(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list buckets: %w", err)
 	}
@@ -177,12 +160,11 @@ func (c *S3Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
 
 // BucketExists checks if a bucket exists
 func (c *S3Client) BucketExists(ctx context.Context, bucket string) (bool, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	_, err := c.client.HeadBucket(ctx, &s3.HeadBucketInput{
+	input := &s3.HeadBucketInput{
 		Bucket: aws.String(bucket),
-	})
+	}
+
+	_, err := c.client.HeadBucket(ctx, input)
 	if err != nil {
 		// Check if it's a "not found" error
 		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchBucket") {
@@ -194,96 +176,102 @@ func (c *S3Client) BucketExists(ctx context.Context, bucket string) (bool, error
 	return true, nil
 }
 
-// GetBucketInfo gets comprehensive information about a bucket
+// GetBucketInfo gets information about a bucket
 func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	// Check if bucket exists
+	exists, err := c.BucketExists(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("bucket %s does not exist", bucket)
+	}
 
-	// Initialize bucket info
-	bucketInfo := &BucketInfo{
+	info := &BucketInfo{
 		Name: bucket,
 	}
 
 	// Get bucket location
-	locationResult, err := c.client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
+	locationInput := &s3.GetBucketLocationInput{
 		Bucket: aws.String(bucket),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get bucket location: %w", err)
 	}
-
-	// Handle empty location constraint (means us-east-1)
-	region := string(locationResult.LocationConstraint)
-	if region == "" {
-		region = "us-east-1"
-	}
-	bucketInfo.Region = region
-
-	// Get bucket creation date from list buckets (gracefully handle errors)
-	listResult, err := c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	locationResult, err := c.client.GetBucketLocation(ctx, locationInput)
 	if err == nil {
-		for _, b := range listResult.Buckets {
-			if aws.ToString(b.Name) == bucket {
-				bucketInfo.CreationDate = aws.ToTime(b.CreationDate)
-				break
-			}
+		info.Region = string(locationResult.LocationConstraint)
+		if info.Region == "" {
+			info.Region = "us-east-1" // Default region
 		}
 	}
-	// If ListBuckets fails, we don't treat it as an error - just leave CreationDate as zero value
 
-	// Get bucket versioning status
-	versioningResult, err := c.client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{
+	// Get bucket versioning
+	versioningInput := &s3.GetBucketVersioningInput{
 		Bucket: aws.String(bucket),
-	})
+	}
+	versioningResult, err := c.client.GetBucketVersioning(ctx, versioningInput)
 	if err == nil {
-		bucketInfo.VersioningStatus = string(versioningResult.Status)
+		info.VersioningStatus = string(versioningResult.Status)
 	}
 
-	// Get public access block settings
-	publicAccessResult, err := c.client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
+	// Try to get bucket policy to check if it has one
+	policyInput := &s3.GetBucketPolicyInput{
 		Bucket: aws.String(bucket),
-	})
+	}
+	_, err = c.client.GetBucketPolicy(ctx, policyInput)
+	if err == nil {
+		info.HasPolicy = true
+	}
+
+	// Try to get bucket encryption
+	encryptionInput := &s3.GetBucketEncryptionInput{
+		Bucket: aws.String(bucket),
+	}
+	_, err = c.client.GetBucketEncryption(ctx, encryptionInput)
+	if err == nil {
+		info.EncryptionEnabled = true
+	}
+
+	// Try to get public access block
+	publicAccessInput := &s3.GetPublicAccessBlockInput{
+		Bucket: aws.String(bucket),
+	}
+	publicAccessResult, err := c.client.GetPublicAccessBlock(ctx, publicAccessInput)
 	if err == nil && publicAccessResult.PublicAccessBlockConfiguration != nil {
-		cfg := publicAccessResult.PublicAccessBlockConfiguration
-		bucketInfo.PublicAccessBlocked = aws.ToBool(cfg.BlockPublicAcls) &&
-			aws.ToBool(cfg.BlockPublicPolicy) &&
-			aws.ToBool(cfg.IgnorePublicAcls) &&
-			aws.ToBool(cfg.RestrictPublicBuckets)
+		config := publicAccessResult.PublicAccessBlockConfiguration
+		info.PublicAccessBlocked = aws.ToBool(config.BlockPublicAcls) &&
+			aws.ToBool(config.BlockPublicPolicy) &&
+			aws.ToBool(config.IgnorePublicAcls) &&
+			aws.ToBool(config.RestrictPublicBuckets)
 	}
 
-	// Check if bucket has a policy
-	_, err = c.client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{
+	// Get object count and total size (this is expensive for large buckets)
+	listInput := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
-	})
-	bucketInfo.HasPolicy = err == nil
+	}
 
-	// Get bucket encryption
-	_, err = c.client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{
-		Bucket: aws.String(bucket),
-	})
-	bucketInfo.EncryptionEnabled = err == nil
+	var objectCount int64
+	var totalSize int64
 
-	// Get object count and total size (approximate)
-	objectsResult, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-		Bucket: aws.String(bucket),
-	})
-	if err == nil {
-		bucketInfo.ObjectCount = int64(len(objectsResult.Contents))
-		totalSize := int64(0)
-		for _, obj := range objectsResult.Contents {
+	paginator := s3.NewListObjectsV2Paginator(c.client, listInput)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			break // Don't fail the entire operation if we can't get object stats
+		}
+
+		objectCount += int64(len(page.Contents))
+		for _, obj := range page.Contents {
 			totalSize += aws.ToInt64(obj.Size)
 		}
-		bucketInfo.TotalSize = totalSize
 	}
 
-	return bucketInfo, nil
+	info.ObjectCount = objectCount
+	info.TotalSize = totalSize
+
+	return info, nil
 }
 
 // PutObject uploads an object to S3
-func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, options ...*objectOption) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, options ...*ObjectOptions) error {
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -292,7 +280,9 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 
 	// Apply options
 	for _, opt := range options {
-		opt.applyToPutObjectInput(input)
+		if opt != nil {
+			opt.ApplyToPutObject(input)
+		}
 	}
 
 	_, err := c.client.PutObject(ctx, input)
@@ -304,10 +294,7 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 }
 
 // PutObjectFromFile uploads a file to S3
-func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, options ...*objectOption) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, options ...*ObjectOptions) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", filePath, err)
@@ -322,12 +309,14 @@ func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath 
 
 	// Apply options
 	for _, opt := range options {
-		opt.applyToPutObjectInput(input)
+		if opt != nil {
+			opt.ApplyToPutObject(input)
+		}
 	}
 
 	_, err = c.client.PutObject(ctx, input)
 	if err != nil {
-		return fmt.Errorf("failed to put object %s/%s from file %s: %w", bucket, key, filePath, err)
+		return fmt.Errorf("failed to put object from file %s to %s/%s: %w", filePath, bucket, key, err)
 	}
 
 	return nil
@@ -335,13 +324,12 @@ func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath 
 
 // GetObject downloads an object from S3
 func (c *S3Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	result, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-	})
+	}
+
+	result, err := c.client.GetObject(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get object %s/%s: %w", bucket, key, err)
 	}
@@ -349,29 +337,26 @@ func (c *S3Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCl
 	return result.Body, nil
 }
 
-// GetObjectToFile downloads an object from S3 to a local file
+// GetObjectToFile downloads an object from S3 to a file
 func (c *S3Client) GetObjectToFile(ctx context.Context, bucket, key, filePath string) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	result, err := c.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
+	// Get the object
+	body, err := c.GetObject(ctx, bucket, key)
 	if err != nil {
-		return fmt.Errorf("failed to get object %s/%s: %w", bucket, key, err)
+		return err
 	}
-	defer result.Body.Close()
+	defer body.Close()
 
+	// Create the file
 	file, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create file %s: %w", filePath, err)
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, result.Body)
+	// Copy the content
+	_, err = io.Copy(file, body)
 	if err != nil {
-		return fmt.Errorf("failed to copy object %s/%s to file %s: %w", bucket, key, filePath, err)
+		return fmt.Errorf("failed to copy object to file %s: %w", filePath, err)
 	}
 
 	return nil
@@ -379,13 +364,12 @@ func (c *S3Client) GetObjectToFile(ctx context.Context, bucket, key, filePath st
 
 // DeleteObject deletes an object from S3
 func (c *S3Client) DeleteObject(ctx context.Context, bucket, key string) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+	input := &s3.DeleteObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-	})
+	}
+
+	_, err := c.client.DeleteObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to delete object %s/%s: %w", bucket, key, err)
 	}
@@ -394,17 +378,16 @@ func (c *S3Client) DeleteObject(ctx context.Context, bucket, key string) error {
 }
 
 // ListObjects lists objects in a bucket
-func (c *S3Client) ListObjects(ctx context.Context, bucket string, options ...ListObjectsOption) (*ListObjectsResult, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+func (c *S3Client) ListObjects(ctx context.Context, bucket string, options ...*ListObjectsOptions) (*ListObjectsResult, error) {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 	}
 
 	// Apply options
 	for _, opt := range options {
-		opt(input)
+		if opt != nil {
+			opt.ApplyToListObjects(input)
+		}
 	}
 
 	result, err := c.client.ListObjectsV2(ctx, input)
@@ -439,15 +422,14 @@ func (c *S3Client) ListObjects(ctx context.Context, bucket string, options ...Li
 	}, nil
 }
 
-// ObjectExists checks if an object exists
+// ObjectExists checks if an object exists in S3
 func (c *S3Client) ObjectExists(ctx context.Context, bucket, key string) (bool, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	_, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{
+	input := &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-	})
+	}
+
+	_, err := c.client.HeadObject(ctx, input)
 	if err != nil {
 		// Check if it's a "not found" error
 		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchKey") {
@@ -459,15 +441,14 @@ func (c *S3Client) ObjectExists(ctx context.Context, bucket, key string) (bool, 
 	return true, nil
 }
 
-// GetObjectInfo gets metadata about an object
+// GetObjectInfo gets information about an object
 func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*ObjectInfo, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	result, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{
+	input := &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-	})
+	}
+
+	result, err := c.client.HeadObject(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get object info for %s/%s: %w", bucket, key, err)
 	}
@@ -482,78 +463,85 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 	}, nil
 }
 
-// SetObjectInfo sets metadata and other object properties by copying it with new settings
-func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, options ...*objectOption) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+// SetObjectInfo sets metadata and other properties for an existing object
+func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, options ...*ObjectOptions) error {
+	// First, get the current object info
+	currentInfo, err := c.GetObjectInfo(ctx, bucket, key)
+	if err != nil {
+		return fmt.Errorf("failed to get current object info: %w", err)
+	}
 
-	// Copy object to itself with new metadata/settings
+	// Create copy input
+	copySource := fmt.Sprintf("%s/%s", bucket, key)
 	input := &s3.CopyObjectInput{
 		Bucket:     aws.String(bucket),
 		Key:        aws.String(key),
-		CopySource: aws.String(bucket + "/" + key),
+		CopySource: aws.String(copySource),
 	}
-
-	// Set metadata directive to replace existing metadata
-	input.MetadataDirective = "REPLACE"
-
-	// Track if we need to set tags separately
-	var tags map[string]string
 
 	// Apply options
 	for _, opt := range options {
 		if opt != nil {
-			opt.applyToCopyObjectInput(input)
-			if len(opt.tags) > 0 {
-				tags = opt.tags
-			}
+			opt.ApplyToCopyObject(input)
 		}
 	}
 
-	_, err := c.client.CopyObject(ctx, input)
+	// If no metadata directive was set, we need to preserve existing metadata
+	if input.MetadataDirective == "" {
+		input.MetadataDirective = types.MetadataDirectiveCopy
+	}
+
+	_, err = c.client.CopyObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to set object info for %s/%s: %w", bucket, key, err)
 	}
 
-	// Set tags if provided
-	if len(tags) > 0 {
-		var tagSet []types.Tag
-		for k, v := range tags {
-			tagSet = append(tagSet, types.Tag{
-				Key:   aws.String(k),
-				Value: aws.String(v),
-			})
-		}
+	// Handle tags separately if provided
+	for _, opt := range options {
+		if opt != nil && len(opt.Tags) > 0 {
+			// Convert tags to the format expected by PutObjectTagging
+			tagSet := make([]types.Tag, 0, len(opt.Tags))
+			for key, value := range opt.Tags {
+				tagSet = append(tagSet, types.Tag{
+					Key:   aws.String(key),
+					Value: aws.String(value),
+				})
+			}
 
-		_, err = c.client.PutObjectTagging(ctx, &s3.PutObjectTaggingInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-			Tagging: &types.Tagging{
-				TagSet: tagSet,
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to set tags for %s/%s: %w", bucket, key, err)
+			tagInput := &s3.PutObjectTaggingInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(key),
+				Tagging: &types.Tagging{
+					TagSet: tagSet,
+				},
+			}
+
+			_, err = c.client.PutObjectTagging(ctx, tagInput)
+			if err != nil {
+				return fmt.Errorf("failed to set object tags for %s/%s: %w", bucket, key, err)
+			}
 		}
 	}
+
+	_ = currentInfo // Suppress unused variable warning
 
 	return nil
 }
 
 // CopyObject copies an object from one location to another
-func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, options ...*objectOption) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, options ...*ObjectOptions) error {
+	copySource := fmt.Sprintf("%s/%s", srcBucket, srcKey)
 	input := &s3.CopyObjectInput{
 		Bucket:     aws.String(dstBucket),
 		Key:        aws.String(dstKey),
-		CopySource: aws.String(srcBucket + "/" + srcKey),
+		CopySource: aws.String(copySource),
 	}
 
-	// Apply options directly
+	// Apply options
 	for _, opt := range options {
-		opt.applyToCopyObjectInput(input)
+		if opt != nil {
+			opt.ApplyToCopyObject(input)
+		}
 	}
 
 	_, err := c.client.CopyObject(ctx, input)
@@ -566,97 +554,95 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 
 // PresignURL generates a pre-signed URL for temporary access to an object
 func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresInSec int, method string) (string, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// Validate method
-	if method != "GET" && method != "HEAD" {
-		return "", fmt.Errorf("invalid method %s, only GET and HEAD are supported", method)
-	}
-
 	// Create presign client
 	presignClient := s3.NewPresignClient(c.client)
 
 	// Set expiration duration
 	expiration := time.Duration(expiresInSec) * time.Second
 
-	switch method {
+	var req *v4.PresignedHTTPRequest
+	var err error
+
+	switch strings.ToUpper(method) {
 	case "GET":
-		request, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		getReq := &s3.GetObjectInput{
 			Bucket: aws.String(bucket),
 			Key:    aws.String(key),
-		}, func(opts *s3.PresignOptions) {
+		}
+		req, err = presignClient.PresignGetObject(ctx, getReq, func(opts *s3.PresignOptions) {
 			opts.Expires = expiration
 		})
-		if err != nil {
-			return "", fmt.Errorf("failed to presign GET request: %w", err)
+	case "PUT":
+		putReq := &s3.PutObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
 		}
-		return request.URL, nil
-
+		req, err = presignClient.PresignPutObject(ctx, putReq, func(opts *s3.PresignOptions) {
+			opts.Expires = expiration
+		})
 	case "HEAD":
-		request, err := presignClient.PresignHeadObject(ctx, &s3.HeadObjectInput{
+		headReq := &s3.HeadObjectInput{
 			Bucket: aws.String(bucket),
 			Key:    aws.String(key),
-		}, func(opts *s3.PresignOptions) {
+		}
+		req, err = presignClient.PresignHeadObject(ctx, headReq, func(opts *s3.PresignOptions) {
 			opts.Expires = expiration
 		})
-		if err != nil {
-			return "", fmt.Errorf("failed to presign HEAD request: %w", err)
-		}
-		return request.URL, nil
-
 	default:
 		return "", fmt.Errorf("unsupported method: %s", method)
 	}
-}
 
-// deleteAllObjects deletes all objects in a bucket (for force delete)
-func (c *S3Client) deleteAllObjects(ctx context.Context, bucket string) error {
-	// List all objects
-	result, err := c.ListObjects(ctx, bucket)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("failed to presign URL for %s/%s: %w", bucket, key, err)
 	}
 
-	// Delete objects in batches
-	for len(result.Contents) > 0 {
-		// Prepare delete input
-		var objects []types.ObjectIdentifier
-		for _, obj := range result.Contents {
-			objects = append(objects, types.ObjectIdentifier{
-				Key: aws.String(obj.Key),
-			})
+	return req.URL, nil
+}
+
+// deleteAllObjects deletes all objects in a bucket (helper for force delete)
+func (c *S3Client) deleteAllObjects(ctx context.Context, bucket string) error {
+	// List all objects
+	listInput := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+	}
+
+	paginator := s3.NewListObjectsV2Paginator(c.client, listInput)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list objects for deletion: %w", err)
 		}
 
-		// Delete batch
-		_, err := c.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		if len(page.Contents) == 0 {
+			continue
+		}
+
+		// Prepare objects for deletion
+		objects := make([]types.ObjectIdentifier, len(page.Contents))
+		for i, obj := range page.Contents {
+			objects[i] = types.ObjectIdentifier{
+				Key: obj.Key,
+			}
+		}
+
+		// Delete objects in batch
+		deleteInput := &s3.DeleteObjectsInput{
 			Bucket: aws.String(bucket),
 			Delete: &types.Delete{
 				Objects: objects,
 			},
-		})
+		}
+
+		_, err = c.client.DeleteObjects(ctx, deleteInput)
 		if err != nil {
 			return fmt.Errorf("failed to delete objects: %w", err)
-		}
-
-		// Check if there are more objects
-		if !result.IsTruncated {
-			break
-		}
-
-		// List next batch
-		result, err = c.ListObjects(ctx, bucket, WithContinuationToken(result.NextMarker))
-		if err != nil {
-			return err
 		}
 	}
 
 	return nil
 }
 
-// Data structures
-
-// BucketInfo represents information about a bucket
+// BucketInfo contains information about an S3 bucket
 type BucketInfo struct {
 	Name                string    `json:"name"`
 	CreationDate        time.Time `json:"creation_date,omitempty"`
@@ -669,7 +655,7 @@ type BucketInfo struct {
 	TotalSize           int64     `json:"total_size,omitempty"`
 }
 
-// ObjectInfo represents information about an object
+// ObjectInfo contains information about an S3 object
 type ObjectInfo struct {
 	Key          string            `json:"key"`
 	Size         int64             `json:"size"`
@@ -679,7 +665,7 @@ type ObjectInfo struct {
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
-// ListObjectsResult represents the result of listing objects
+// ListObjectsResult contains the result of a list objects operation
 type ListObjectsResult struct {
 	Contents       []ObjectInfo `json:"contents"`
 	CommonPrefixes []string     `json:"common_prefixes,omitempty"`
@@ -688,165 +674,4 @@ type ListObjectsResult struct {
 	MaxKeys        int          `json:"max_keys"`
 	Prefix         string       `json:"prefix,omitempty"`
 	Delimiter      string       `json:"delimiter,omitempty"`
-}
-
-// Option types for methods
-
-// objectOption is a private unified option type for object operations
-type objectOption struct {
-	contentType        *string
-	metadata           map[string]string
-	tags               map[string]string
-	cacheControl       *string
-	contentEncoding    *string
-	contentDisposition *string
-	contentLanguage    *string
-	expires            *time.Time
-}
-
-// applyToPutObjectInput applies the option to a PutObjectInput
-func (o *objectOption) applyToPutObjectInput(input *s3.PutObjectInput) {
-	if o.contentType != nil {
-		input.ContentType = o.contentType
-	}
-	if len(o.metadata) > 0 {
-		input.Metadata = o.metadata
-	}
-	if o.cacheControl != nil {
-		input.CacheControl = o.cacheControl
-	}
-	if o.contentEncoding != nil {
-		input.ContentEncoding = o.contentEncoding
-	}
-	if o.contentDisposition != nil {
-		input.ContentDisposition = o.contentDisposition
-	}
-	if o.contentLanguage != nil {
-		input.ContentLanguage = o.contentLanguage
-	}
-	if o.expires != nil {
-		input.Expires = o.expires
-	}
-}
-
-// applyToCopyObjectInput applies the option to a CopyObjectInput
-func (o *objectOption) applyToCopyObjectInput(input *s3.CopyObjectInput) {
-	if o.contentType != nil {
-		input.ContentType = o.contentType
-		input.MetadataDirective = "REPLACE"
-	}
-	if len(o.metadata) > 0 {
-		input.Metadata = o.metadata
-		input.MetadataDirective = "REPLACE"
-	}
-	if o.cacheControl != nil {
-		input.CacheControl = o.cacheControl
-		input.MetadataDirective = "REPLACE"
-	}
-	if o.contentEncoding != nil {
-		input.ContentEncoding = o.contentEncoding
-		input.MetadataDirective = "REPLACE"
-	}
-	if o.contentDisposition != nil {
-		input.ContentDisposition = o.contentDisposition
-		input.MetadataDirective = "REPLACE"
-	}
-	if o.contentLanguage != nil {
-		input.ContentLanguage = o.contentLanguage
-		input.MetadataDirective = "REPLACE"
-	}
-	if o.expires != nil {
-		input.Expires = o.expires
-		input.MetadataDirective = "REPLACE"
-	}
-}
-
-// Private option builder functions
-
-// withContentType sets the content type
-func withContentType(contentType string) *objectOption {
-	if contentType == "" {
-		return &objectOption{}
-	}
-	return &objectOption{contentType: aws.String(contentType)}
-}
-
-// withMetadata sets metadata
-func withMetadata(metadata map[string]string) *objectOption {
-	return &objectOption{metadata: metadata}
-}
-
-// withTags sets tags
-func withTags(tags map[string]string) *objectOption {
-	return &objectOption{tags: tags}
-}
-
-// withCacheControl sets cache control
-func withCacheControl(cacheControl string) *objectOption {
-	if cacheControl == "" {
-		return &objectOption{}
-	}
-	return &objectOption{cacheControl: aws.String(cacheControl)}
-}
-
-// withContentEncoding sets content encoding
-func withContentEncoding(contentEncoding string) *objectOption {
-	if contentEncoding == "" {
-		return &objectOption{}
-	}
-	return &objectOption{contentEncoding: aws.String(contentEncoding)}
-}
-
-// withContentDisposition sets content disposition
-func withContentDisposition(contentDisposition string) *objectOption {
-	if contentDisposition == "" {
-		return &objectOption{}
-	}
-	return &objectOption{contentDisposition: aws.String(contentDisposition)}
-}
-
-// withContentLanguage sets content language
-func withContentLanguage(contentLanguage string) *objectOption {
-	if contentLanguage == "" {
-		return &objectOption{}
-	}
-	return &objectOption{contentLanguage: aws.String(contentLanguage)}
-}
-
-// withExpires sets expiration
-func withExpires(expires *time.Time) *objectOption {
-	return &objectOption{expires: expires}
-}
-
-// ListObjectsOption configures ListObjects operations
-type ListObjectsOption func(*s3.ListObjectsV2Input)
-
-// WithPrefix sets the prefix for ListObjects
-func WithPrefix(prefix string) ListObjectsOption {
-	return func(input *s3.ListObjectsV2Input) {
-		input.Prefix = aws.String(prefix)
-	}
-}
-
-// WithDelimiter sets the delimiter for ListObjects
-func WithDelimiter(delimiter string) ListObjectsOption {
-	return func(input *s3.ListObjectsV2Input) {
-		input.Delimiter = aws.String(delimiter)
-	}
-}
-
-// WithMaxKeys sets the maximum number of keys for ListObjects
-func WithMaxKeys(maxKeys int) ListObjectsOption {
-	return func(input *s3.ListObjectsV2Input) {
-		input.MaxKeys = aws.Int32(int32(maxKeys))
-	}
-}
-
-// WithContinuationToken sets the continuation token for ListObjects
-func WithContinuationToken(token string) ListObjectsOption {
-	return func(input *s3.ListObjectsV2Input) {
-		if token != "" {
-			input.ContinuationToken = aws.String(token)
-		}
-	}
 }

@@ -38,6 +38,25 @@ const (
 	ProviderCustom = "custom"
 )
 
+// providerOrder defines the order in which providers should be checked
+// Specific providers first, fallback providers last
+var providerOrder = []string{
+	ProviderAWS,
+	ProviderDigitalOcean,
+	ProviderLinode,
+	ProviderWasabi,
+	ProviderBackblaze,
+	ProviderCloudflare,
+	ProviderScaleway,
+	ProviderAlibaba,
+	ProviderGoogle,
+	ProviderOracle,
+	ProviderIBM,
+	// Fallback providers - these should be checked last
+	ProviderMinIO,
+	ProviderCustom,
+}
+
 // URLStyle represents different URL addressing styles
 type URLStyle int
 
@@ -88,6 +107,40 @@ type ProviderConfig struct {
 	RequiresNamespace     bool
 }
 
+// GetServiceType returns the service type name for backward compatibility
+func (p *ProviderConfig) GetServiceType() string {
+	switch p.Name {
+	case ProviderAWS:
+		return "aws_s3"
+	case ProviderCloudflare:
+		return "cloudflare_r2"
+	case ProviderBackblaze:
+		return "backblaze_b2"
+	case ProviderDigitalOcean:
+		return "digitalocean_spaces"
+	case ProviderLinode:
+		return "linode_object_storage"
+	case ProviderWasabi:
+		return "wasabi"
+	case ProviderScaleway:
+		return "scaleway_object_storage"
+	case ProviderAlibaba:
+		return "alibaba_oss"
+	case ProviderGoogle:
+		return "google_cloud_storage"
+	case ProviderOracle:
+		return "oracle_object_storage"
+	case ProviderIBM:
+		return "ibm_cloud_object_storage"
+	case ProviderMinIO:
+		return "minio"
+	case ProviderCustom:
+		return "custom"
+	default:
+		return "aws_s3"
+	}
+}
+
 // GetProviderConfig returns the configuration for a specific provider
 func GetProviderConfig(provider string) *ProviderConfig {
 	if config, exists := providerConfigs[provider]; exists {
@@ -98,8 +151,8 @@ func GetProviderConfig(provider string) *ProviderConfig {
 
 // GetAllProviders returns a list of all supported provider names
 func GetAllProviders() []string {
-	providers := make([]string, 0, len(providerConfigs))
-	for name := range providerConfigs {
+	providers := make([]string, 0, len(providerOrder))
+	for _, name := range providerOrder {
 		if name != ProviderCustom {
 			providers = append(providers, name)
 		}
@@ -110,24 +163,6 @@ func GetAllProviders() []string {
 // DetectProviderFromURL attempts to detect the provider from a URL
 // Checks providers in a specific order to ensure specific providers are matched before fallback ones
 func DetectProviderFromURL(s3URL string) string {
-	// Define provider order - specific providers first, fallback providers last
-	providerOrder := []string{
-		ProviderAWS,
-		ProviderDigitalOcean,
-		ProviderLinode,
-		ProviderWasabi,
-		ProviderBackblaze,
-		ProviderCloudflare,
-		ProviderScaleway,
-		ProviderAlibaba,
-		ProviderGoogle,
-		ProviderOracle,
-		ProviderIBM,
-		// Fallback providers - these should be checked last
-		ProviderMinIO,
-		ProviderCustom,
-	}
-
 	for _, provider := range providerOrder {
 		config, exists := providerConfigs[provider]
 		if !exists {
