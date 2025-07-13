@@ -236,7 +236,7 @@ func detectServiceTypeFromURL(s3URL string) string {
 
 	// s3:// URLs don't contain service-specific information
 	if strings.HasPrefix(s3URL, "s3://") {
-		return ProviderUnknown
+		return ProviderCustom
 	}
 
 	// Use the unified provider system

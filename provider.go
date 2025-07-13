@@ -34,8 +34,6 @@ const (
 	ProviderOracle = "oracle"
 	// ProviderIBM is IBM Cloud Object Storage
 	ProviderIBM = "ibm"
-	// ProviderUnknown is for unknown providers (e.g., s3:// URLs)
-	ProviderUnknown = "unknown"
 	// ProviderCustom is for custom providers
 	ProviderCustom = "custom"
 )
@@ -102,7 +100,7 @@ func GetProviderConfig(provider string) *ProviderConfig {
 func GetAllProviders() []string {
 	providers := make([]string, 0, len(providerConfigs))
 	for name := range providerConfigs {
-		if name != ProviderCustom && name != ProviderUnknown {
+		if name != ProviderCustom {
 			providers = append(providers, name)
 		}
 	}
@@ -110,9 +108,29 @@ func GetAllProviders() []string {
 }
 
 // DetectProviderFromURL attempts to detect the provider from a URL
+// Checks providers in a specific order to ensure specific providers are matched before fallback ones
 func DetectProviderFromURL(s3URL string) string {
-	for provider, config := range providerConfigs {
-		if provider == ProviderCustom {
+	// Define provider order - specific providers first, fallback providers last
+	providerOrder := []string{
+		ProviderAWS,
+		ProviderDigitalOcean,
+		ProviderLinode,
+		ProviderWasabi,
+		ProviderBackblaze,
+		ProviderCloudflare,
+		ProviderScaleway,
+		ProviderAlibaba,
+		ProviderGoogle,
+		ProviderOracle,
+		ProviderIBM,
+		// Fallback providers - these should be checked last
+		ProviderMinIO,
+		ProviderCustom,
+	}
+
+	for _, provider := range providerOrder {
+		config, exists := providerConfigs[provider]
+		if !exists {
 			continue
 		}
 
@@ -122,6 +140,7 @@ func DetectProviderFromURL(s3URL string) string {
 			}
 		}
 	}
+
 	return ProviderCustom
 }
 
@@ -139,7 +158,7 @@ func ParseURLWithProvider(s3URL string, provider string) (bucket, key string, de
 			key = parts[1]
 		}
 		// s3:// URLs don't contain provider-specific information
-		detectedProvider = ProviderUnknown
+		detectedProvider = ProviderCustom
 		if provider != "" {
 			detectedProvider = provider
 		}
@@ -305,10 +324,12 @@ var providerConfigs = map[string]*ProviderConfig{
 		SupportsPathStyle:     true,
 		URLPatterns: []URLPattern{
 			{
-				Pattern:   regexp.MustCompile(`^https?://localhost:[0-9]+/`),
+				// IP addresses with port
+				Pattern:   regexp.MustCompile(`^https?://[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]+/`),
 				ParseFunc: parsePathStyleURL,
 			},
 			{
+				// Domain names with port
 				Pattern:   regexp.MustCompile(`^https?://[^/]+:[0-9]+/`),
 				ParseFunc: parsePathStyleURL,
 			},
@@ -546,26 +567,6 @@ var providerConfigs = map[string]*ProviderConfig{
 		},
 	},
 
-	ProviderUnknown: {
-		Name:                  ProviderUnknown,
-		DisplayName:           "Unknown S3 Service",
-		DefaultRegion:         "us-east-1",
-		DefaultPort:           "443",
-		ForcePathStyle:        false,
-		URLStyle:              URLStylePath,
-		EndpointPattern:       "s3.amazonaws.com",
-		SupportsVirtualHosted: true,
-		SupportsPathStyle:     true,
-		URLPatterns:           []URLPattern{},
-		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
-			// Default to AWS S3 format for unknown providers
-			if region == "" || region == "us-east-1" {
-				return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.amazonaws.com", false)
-			}
-			return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.amazonaws.com", false)
-		},
-	},
-
 	ProviderCustom: {
 		Name:                  ProviderCustom,
 		DisplayName:           "Custom S3 Service",
@@ -578,6 +579,7 @@ var providerConfigs = map[string]*ProviderConfig{
 		SupportsPathStyle:     true,
 		URLPatterns: []URLPattern{
 			{
+				// Catch-all pattern for any HTTP/HTTPS URL
 				Pattern:   regexp.MustCompile(`^https?://[^/]+/`),
 				ParseFunc: parsePathStyleURL,
 			},

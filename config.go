@@ -88,20 +88,24 @@ func (c *ClientConfig) ValidateConfig() error {
 // detectServiceType attempts to detect the service type from the endpoint
 func (c *ClientConfig) detectServiceType() string {
 	if c.Endpoint == "" {
-		return "aws_s3"
+		return ProviderAWS
 	}
 
-	endpoint := c.Endpoint
-	switch {
-	case contains(endpoint, "amazonaws.com"):
+	// Use the unified provider system to detect service type
+	testURL := "https://" + c.Endpoint + "/test"
+	detectedProvider := DetectProviderFromURL(testURL)
+
+	// Map provider names to service types for backward compatibility
+	switch detectedProvider {
+	case ProviderAWS:
 		return "aws_s3"
-	case contains(endpoint, "r2.cloudflarestorage.com"):
+	case ProviderCloudflare:
 		return "cloudflare_r2"
-	case contains(endpoint, "backblazeb2.com"):
+	case ProviderBackblaze:
 		return "backblaze_b2"
-	case contains(endpoint, "digitaloceanspaces.com"):
+	case ProviderDigitalOcean:
 		return "digitalocean_spaces"
-	case contains(endpoint, "localhost") || contains(endpoint, "127.0.0.1"):
+	case ProviderMinIO:
 		return "minio"
 	default:
 		return "aws_s3"
@@ -144,19 +148,30 @@ func (c *ClientConfig) GetEndpointURL() string {
 		return c.Endpoint
 	}
 
-	// Generate default endpoint based on service type
+	// Map service type to provider for unified handling
+	var provider string
 	switch c.ServiceType {
 	case "aws_s3":
-		return "" // Use default AWS SDK endpoint
+		provider = ProviderAWS
 	case "cloudflare_r2":
-		return "" // R2 requires custom endpoint
+		provider = ProviderCloudflare
 	case "digitalocean_spaces":
-		return "https://" + c.Region + ".digitaloceanspaces.com"
+		provider = ProviderDigitalOcean
 	case "backblaze_b2":
-		return "https://s3." + c.Region + ".backblazeb2.com"
+		provider = ProviderBackblaze
 	case "minio":
-		return "http://localhost:9000"
+		provider = ProviderMinIO
 	default:
+		provider = ProviderAWS
+	}
+
+	// Use the unified provider system to generate endpoint URL
+	config := GetProviderConfig(provider)
+	if config == nil {
 		return ""
 	}
+
+	// Generate URL using the provider's GenerateURL function
+	// For endpoint generation, we use empty bucket/key and let the provider handle it
+	return config.GenerateURL("", "", c.Region, c.Endpoint, c.UseSSL)
 }

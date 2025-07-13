@@ -244,11 +244,11 @@ func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInf
 		Bucket: aws.String(bucket),
 	})
 	if err == nil && publicAccessResult.PublicAccessBlockConfiguration != nil {
-		config := publicAccessResult.PublicAccessBlockConfiguration
-		bucketInfo.PublicAccessBlocked = aws.ToBool(config.BlockPublicAcls) &&
-			aws.ToBool(config.BlockPublicPolicy) &&
-			aws.ToBool(config.IgnorePublicAcls) &&
-			aws.ToBool(config.RestrictPublicBuckets)
+		cfg := publicAccessResult.PublicAccessBlockConfiguration
+		bucketInfo.PublicAccessBlocked = aws.ToBool(cfg.BlockPublicAcls) &&
+			aws.ToBool(cfg.BlockPublicPolicy) &&
+			aws.ToBool(cfg.IgnorePublicAcls) &&
+			aws.ToBool(cfg.RestrictPublicBuckets)
 	}
 
 	// Check if bucket has a policy
@@ -280,7 +280,7 @@ func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInf
 }
 
 // PutObject uploads an object to S3
-func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, options ...PutObjectOption) error {
+func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, options ...*objectOption) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -292,7 +292,7 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 
 	// Apply options
 	for _, opt := range options {
-		opt(input)
+		opt.applyToPutObjectInput(input)
 	}
 
 	_, err := c.client.PutObject(ctx, input)
@@ -304,7 +304,7 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 }
 
 // PutObjectFromFile uploads a file to S3
-func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, options ...PutObjectOption) error {
+func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, options ...*objectOption) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -322,7 +322,7 @@ func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath 
 
 	// Apply options
 	for _, opt := range options {
-		opt(input)
+		opt.applyToPutObjectInput(input)
 	}
 
 	_, err = c.client.PutObject(ctx, input)
@@ -541,7 +541,7 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, option
 }
 
 // CopyObject copies an object from one location to another
-func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, options ...PutObjectOption) error {
+func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, options ...*objectOption) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -551,21 +551,9 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 		CopySource: aws.String(srcBucket + "/" + srcKey),
 	}
 
-	// Convert PutObjectOptions to unified options and apply them
+	// Apply options directly
 	for _, opt := range options {
-		// Create a dummy PutObjectInput to extract option values
-		dummyPutInput := &s3.PutObjectInput{}
-		opt(dummyPutInput)
-
-		// Convert to unified option and apply
-		unifiedOpt := &objectOption{
-			contentType:     dummyPutInput.ContentType,
-			metadata:        dummyPutInput.Metadata,
-			cacheControl:    dummyPutInput.CacheControl,
-			contentEncoding: dummyPutInput.ContentEncoding,
-		}
-
-		unifiedOpt.applyToCopyObjectInput(input)
+		opt.applyToCopyObjectInput(input)
 	}
 
 	_, err := c.client.CopyObject(ctx, input)
@@ -577,7 +565,7 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 }
 
 // PresignURL generates a pre-signed URL for temporary access to an object
-func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresIn int, method string) (string, error) {
+func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresInSec int, method string) (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -590,7 +578,7 @@ func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresIn
 	presignClient := s3.NewPresignClient(c.client)
 
 	// Set expiration duration
-	expiration := time.Duration(expiresIn) * time.Second
+	expiration := time.Duration(expiresInSec) * time.Second
 
 	switch method {
 	case "GET":
@@ -828,39 +816,6 @@ func withContentLanguage(contentLanguage string) *objectOption {
 // withExpires sets expiration
 func withExpires(expires *time.Time) *objectOption {
 	return &objectOption{expires: expires}
-}
-
-// Public option types for backward compatibility
-
-// PutObjectOption configures PutObject operations
-type PutObjectOption func(*s3.PutObjectInput)
-
-// WithContentType sets the content type for PutObject
-func WithContentType(contentType string) PutObjectOption {
-	return func(input *s3.PutObjectInput) {
-		input.ContentType = aws.String(contentType)
-	}
-}
-
-// WithMetadata sets metadata for PutObject
-func WithMetadata(metadata map[string]string) PutObjectOption {
-	return func(input *s3.PutObjectInput) {
-		input.Metadata = metadata
-	}
-}
-
-// WithCacheControl sets cache control for PutObject
-func WithCacheControl(cacheControl string) PutObjectOption {
-	return func(input *s3.PutObjectInput) {
-		input.CacheControl = aws.String(cacheControl)
-	}
-}
-
-// WithContentEncoding sets content encoding for PutObject
-func WithContentEncoding(encoding string) PutObjectOption {
-	return func(input *s3.PutObjectInput) {
-		input.ContentEncoding = aws.String(encoding)
-	}
 }
 
 // ListObjectsOption configures ListObjects operations

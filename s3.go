@@ -415,18 +415,18 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 	contentReader := strings.NewReader(content)
 
 	// Build options
-	var options []PutObjectOption
+	var options []*objectOption
 
 	if contentType != "" {
-		options = append(options, WithContentType(contentType))
+		options = append(options, withContentType(contentType))
 	}
 
 	if contentEncoding != "" {
-		options = append(options, WithContentEncoding(contentEncoding))
+		options = append(options, withContentEncoding(contentEncoding))
 	}
 
 	if cacheControl != "" {
-		options = append(options, WithCacheControl(cacheControl))
+		options = append(options, withCacheControl(cacheControl))
 	}
 
 	// Handle metadata
@@ -435,7 +435,7 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		options = append(options, WithMetadata(metadataMap))
+		options = append(options, withMetadata(metadataMap))
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
@@ -472,18 +472,18 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 	}
 
 	// Build options
-	var options []PutObjectOption
+	var options []*objectOption
 
 	if contentType != "" {
-		options = append(options, WithContentType(contentType))
+		options = append(options, withContentType(contentType))
 	}
 
 	if contentEncoding != "" {
-		options = append(options, WithContentEncoding(contentEncoding))
+		options = append(options, withContentEncoding(contentEncoding))
 	}
 
 	if cacheControl != "" {
-		options = append(options, WithCacheControl(cacheControl))
+		options = append(options, withCacheControl(cacheControl))
 	}
 
 	// Handle metadata
@@ -492,7 +492,7 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		options = append(options, WithMetadata(metadataMap))
+		options = append(options, withMetadata(metadataMap))
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
@@ -803,18 +803,18 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 	}
 
 	// Build options
-	var options []PutObjectOption
+	var options []*objectOption
 
 	if contentType != "" {
-		options = append(options, WithContentType(contentType))
+		options = append(options, withContentType(contentType))
 	}
 
 	if contentEncoding != "" {
-		options = append(options, WithContentEncoding(contentEncoding))
+		options = append(options, withContentEncoding(contentEncoding))
 	}
 
 	if cacheControl != "" {
-		options = append(options, WithCacheControl(cacheControl))
+		options = append(options, withCacheControl(cacheControl))
 	}
 
 	// Handle metadata
@@ -823,7 +823,7 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		options = append(options, WithMetadata(metadataMap))
+		options = append(options, withMetadata(metadataMap))
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
