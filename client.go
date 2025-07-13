@@ -464,7 +464,12 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 }
 
 // SetObjectInfo sets metadata and other properties for an existing object
-func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, options ...*ObjectOptions) error {
+func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *ObjectOptions) error {
+	// Return early if no options provided
+	if opts == nil || !opts.validate() {
+		return nil
+	}
+
 	// First, get the current object info
 	currentInfo, err := c.GetObjectInfo(ctx, bucket, key)
 	if err != nil {
@@ -480,11 +485,7 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, option
 	}
 
 	// Apply options
-	for _, opt := range options {
-		if opt != nil {
-			opt.ApplyToCopyObject(input)
-		}
-	}
+	opts.ApplyToCopyObject(input)
 
 	// If no metadata directive was set, we need to preserve existing metadata
 	if input.MetadataDirective == "" {
@@ -497,29 +498,27 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, option
 	}
 
 	// Handle tags separately if provided
-	for _, opt := range options {
-		if opt != nil && len(opt.Tags) > 0 {
-			// Convert tags to the format expected by PutObjectTagging
-			tagSet := make([]types.Tag, 0, len(opt.Tags))
-			for key, value := range opt.Tags {
-				tagSet = append(tagSet, types.Tag{
-					Key:   aws.String(key),
-					Value: aws.String(value),
-				})
-			}
+	if opts.Tags != nil && len(*opts.Tags) > 0 {
+		// Convert tags to the format expected by PutObjectTagging
+		tagSet := make([]types.Tag, 0, len(*opts.Tags))
+		for key, value := range *opts.Tags {
+			tagSet = append(tagSet, types.Tag{
+				Key:   aws.String(key),
+				Value: aws.String(value),
+			})
+		}
 
-			tagInput := &s3.PutObjectTaggingInput{
-				Bucket: aws.String(bucket),
-				Key:    aws.String(key),
-				Tagging: &types.Tagging{
-					TagSet: tagSet,
-				},
-			}
+		tagInput := &s3.PutObjectTaggingInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+			Tagging: &types.Tagging{
+				TagSet: tagSet,
+			},
+		}
 
-			_, err = c.client.PutObjectTagging(ctx, tagInput)
-			if err != nil {
-				return fmt.Errorf("failed to set object tags for %s/%s: %w", bucket, key, err)
-			}
+		_, err = c.client.PutObjectTagging(ctx, tagInput)
+		if err != nil {
+			return fmt.Errorf("failed to set object tags for %s/%s: %w", bucket, key, err)
 		}
 	}
 
@@ -597,6 +596,14 @@ func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresIn
 	}
 
 	return req.URL, nil
+}
+
+// GetPublicURL generates a public HTTP URL for an object using client configuration
+func (c *S3Client) GetPublicURL(bucket, key string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return GenerateURLWithProvider(bucket, key, c.config.Region, c.config.Endpoint, c.config.UseSSL, c.config.ServiceType)
 }
 
 // deleteAllObjects deletes all objects in a bucket (helper for force delete)

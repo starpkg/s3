@@ -279,6 +279,7 @@ func (s *S3ClientStruct) Struct() *starlarkstruct.Struct {
 		"set_object_info": starlark.NewBuiltin("s3.set_object_info", s.setObjectInfo),
 		"copy_object":     starlark.NewBuiltin("s3.copy_object", s.copyObject),
 		"presign_url":     starlark.NewBuiltin("s3.presign_url", s.presignURL),
+		"get_public_url":  starlark.NewBuiltin("s3.get_public_url", s.getPublicURL),
 	})
 }
 
@@ -415,12 +416,16 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 	contentReader := strings.NewReader(content)
 
 	// Build options
-	option := &ObjectOptions{
-		ContentType:     contentType,
-		ContentEncoding: contentEncoding,
-		CacheControl:    cacheControl,
-		Metadata:        make(map[string]string),
-		Tags:            make(map[string]string),
+	option := &ObjectOptions{}
+
+	if contentType != "" {
+		option.ContentType = &contentType
+	}
+	if contentEncoding != "" {
+		option.ContentEncoding = &contentEncoding
+	}
+	if cacheControl != "" {
+		option.CacheControl = &cacheControl
 	}
 
 	// Handle metadata
@@ -429,7 +434,7 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		option.Metadata = metadataMap
+		option.Metadata = &metadataMap
 	}
 
 	// Handle tags
@@ -438,7 +443,7 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 		if err != nil {
 			return none, fmt.Errorf("failed to convert tags: %w", err)
 		}
-		option.Tags = tagsMap
+		option.Tags = &tagsMap
 	}
 
 	// Handle expires
@@ -451,8 +456,7 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 	}
 
 	var options []*ObjectOptions
-	if option.ContentType != "" || option.ContentEncoding != "" || option.CacheControl != "" ||
-		len(option.Metadata) > 0 || len(option.Tags) > 0 || option.Expires != nil {
+	if option.validate() {
 		options = append(options, option)
 	}
 
@@ -490,11 +494,16 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 	}
 
 	// Build options
-	option := &ObjectOptions{
-		ContentType:     contentType,
-		ContentEncoding: contentEncoding,
-		CacheControl:    cacheControl,
-		Metadata:        make(map[string]string),
+	option := &ObjectOptions{}
+
+	if contentType != "" {
+		option.ContentType = &contentType
+	}
+	if contentEncoding != "" {
+		option.ContentEncoding = &contentEncoding
+	}
+	if cacheControl != "" {
+		option.CacheControl = &cacheControl
 	}
 
 	// Handle metadata
@@ -503,11 +512,11 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		option.Metadata = metadataMap
+		option.Metadata = &metadataMap
 	}
 
 	var options []*ObjectOptions
-	if option.ContentType != "" || option.ContentEncoding != "" || option.CacheControl != "" || len(option.Metadata) > 0 {
+	if option.validate() {
 		options = append(options, option)
 	}
 
@@ -617,14 +626,20 @@ func (s *S3ClientStruct) listObjects(thread *starlark.Thread, b *starlark.Builti
 	}
 
 	// Build options
-	option := &ListObjectsOptions{
-		Prefix:    prefix,
-		Delimiter: delimiter,
-		MaxKeys:   maxKeys,
+	option := &ListObjectsOptions{}
+
+	if prefix != "" {
+		option.Prefix = &prefix
+	}
+	if delimiter != "" {
+		option.Delimiter = &delimiter
+	}
+	if maxKeys > 0 {
+		option.MaxKeys = &maxKeys
 	}
 
 	var options []*ListObjectsOptions
-	if option.Prefix != "" || option.Delimiter != "" || option.MaxKeys > 0 {
+	if option.validate() {
 		options = append(options, option)
 	}
 
@@ -745,27 +760,36 @@ func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Buil
 		expiresTime = &convertedTime
 	}
 
-	// Build options using the new ObjectOption struct
-	option := &ObjectOptions{
-		ContentType:        contentType,
-		Metadata:           metadataMap,
-		Tags:               tagsMap,
-		CacheControl:       cacheControl,
-		ContentEncoding:    contentEncoding,
-		ContentDisposition: contentDisposition,
-		ContentLanguage:    contentLanguage,
-		Expires:            expiresTime,
-	}
+	// Build options using the new ObjectOptions struct with pointer types
+	option := &ObjectOptions{}
 
-	var options []*ObjectOptions
-	if option.ContentType != "" || len(option.Metadata) > 0 || len(option.Tags) > 0 ||
-		option.CacheControl != "" || option.ContentEncoding != "" || option.ContentDisposition != "" ||
-		option.ContentLanguage != "" || option.Expires != nil {
-		options = append(options, option)
+	if contentType != "" {
+		option.ContentType = &contentType
+	}
+	if len(metadataMap) > 0 {
+		option.Metadata = &metadataMap
+	}
+	if len(tagsMap) > 0 {
+		option.Tags = &tagsMap
+	}
+	if cacheControl != "" {
+		option.CacheControl = &cacheControl
+	}
+	if contentEncoding != "" {
+		option.ContentEncoding = &contentEncoding
+	}
+	if contentDisposition != "" {
+		option.ContentDisposition = &contentDisposition
+	}
+	if contentLanguage != "" {
+		option.ContentLanguage = &contentLanguage
+	}
+	if expiresTime != nil {
+		option.Expires = expiresTime
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.SetObjectInfo(ctx, bucket, key, options...)
+	err := s.client.SetObjectInfo(ctx, bucket, key, option)
 	if err != nil {
 		return none, fmt.Errorf("failed to set object info: %w", err)
 	}
@@ -800,11 +824,16 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 	}
 
 	// Build options
-	option := &ObjectOptions{
-		ContentType:     contentType,
-		ContentEncoding: contentEncoding,
-		CacheControl:    cacheControl,
-		Metadata:        make(map[string]string),
+	option := &ObjectOptions{}
+
+	if contentType != "" {
+		option.ContentType = &contentType
+	}
+	if contentEncoding != "" {
+		option.ContentEncoding = &contentEncoding
+	}
+	if cacheControl != "" {
+		option.CacheControl = &cacheControl
 	}
 
 	// Handle metadata
@@ -813,11 +842,11 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 		if err != nil {
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
-		option.Metadata = metadataMap
+		option.Metadata = &metadataMap
 	}
 
 	var options []*ObjectOptions
-	if option.ContentType != "" || option.ContentEncoding != "" || option.CacheControl != "" || len(option.Metadata) > 0 {
+	if option.validate() {
 		options = append(options, option)
 	}
 
@@ -857,75 +886,29 @@ func (s *S3ClientStruct) presignURL(thread *starlark.Thread, b *starlark.Builtin
 	return starlark.String(url), nil
 }
 
-// Utility functions for Starlark
-
-// starParseS3URL parses an S3 URL into bucket and key components
-func starParseS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var urlStr string
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "url", &urlStr); err != nil {
-		return none, err
-	}
-
-	// Use the enhanced provider system for parsing
-	bucket, key, detectedProvider, err := ParseURLWithProvider(urlStr, "")
-	if err != nil {
-		return none, err
-	}
-
-	result := map[string]string{
-		"bucket":       bucket,
-		"key":          key,
-		"service_type": detectedProvider,
-	}
-	return dataconv.Marshal(result)
-}
-
-// starGenerateS3URL generates a standard S3 URL
-func starGenerateS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+// getPublicURL generates a public HTTP URL for an object using client configuration
+func (s *S3ClientStruct) getPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		key    = ""
-		region = "us-east-1"
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"bucket", &bucket,
 		"key", &key,
-		"region?", &region,
 	); err != nil {
 		return none, err
 	}
 
-	url := generateS3URL(bucket, key)
+	// Get client configuration
+	config := s.client.GetConfig()
+
+	// Use the client's configuration to generate the public URL
+	url := GenerateURLWithProvider(bucket, key, config.Region, config.Endpoint, config.UseSSL, config.ServiceType)
 	return starlark.String(url), nil
 }
 
-// starGetPublicURL generates a public HTTP URL for an object
-func starGetPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var (
-		bucket      string
-		key         string
-		region      = "us-east-1"
-		endpoint    = ""
-		useSSL      = true
-		serviceType = "aws"
-	)
-
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"bucket", &bucket,
-		"key", &key,
-		"region?", &region,
-		"endpoint?", &endpoint,
-		"use_ssl?", &useSSL,
-		"service_type?", &serviceType,
-	); err != nil {
-		return none, err
-	}
-
-	// Generate public URL using the provided parameters
-	url := getPublicURL(bucket, key, region, endpoint, useSSL, serviceType)
-	return starlark.String(url), nil
-}
+// Utility functions for Starlark
 
 // starValidateBucketName validates a bucket name
 func starValidateBucketName(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -957,4 +940,74 @@ func starGetSupportedServices(thread *starlark.Thread, b *starlark.Builtin, args
 
 	services := getSupportedServices()
 	return dataconv.Marshal(services)
+}
+
+// starParseS3URL parses an S3 URL and returns bucket, key, and service type
+func starParseS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var s3URL string
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "url", &s3URL); err != nil {
+		return none, err
+	}
+
+	bucket, key, serviceType, err := ParseURLWithProvider(s3URL, "")
+	if err != nil {
+		return none, fmt.Errorf("failed to parse S3 URL: %w", err)
+	}
+
+	result := starlark.NewDict(3)
+	result.SetKey(starlark.String("bucket"), starlark.String(bucket))
+	result.SetKey(starlark.String("key"), starlark.String(key))
+	result.SetKey(starlark.String("service_type"), starlark.String(serviceType))
+
+	return result, nil
+}
+
+// starGenerateS3URL generates an S3 URL from bucket and key
+func starGenerateS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		bucket = ""
+		key    = ""
+	)
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"bucket", &bucket,
+		"key", &key,
+	); err != nil {
+		return none, err
+	}
+
+	var s3URL string
+	if key == "" {
+		s3URL = fmt.Sprintf("s3://%s", bucket)
+	} else {
+		s3URL = fmt.Sprintf("s3://%s/%s", bucket, key)
+	}
+
+	return starlark.String(s3URL), nil
+}
+
+// starGetPublicURL generates a public HTTP URL for an object
+func starGetPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var (
+		bucket      = ""
+		key         = ""
+		region      = "us-east-1"
+		endpoint    = ""
+		useSSL      = true
+		serviceType = "aws"
+	)
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"bucket", &bucket,
+		"key", &key,
+		"region?", &region,
+		"endpoint?", &endpoint,
+		"use_ssl?", &useSSL,
+		"service_type?", &serviceType,
+	); err != nil {
+		return none, err
+	}
+
+	url := GenerateURLWithProvider(bucket, key, region, endpoint, useSSL, serviceType)
+	return starlark.String(url), nil
 }

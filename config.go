@@ -1,9 +1,5 @@
 package s3
 
-import (
-	"time"
-)
-
 // Configuration key constants
 const (
 	configKeyServiceType    = "service_type"
@@ -91,9 +87,9 @@ func (c *ClientConfig) detectServiceType() string {
 		// Default to Custom when no endpoint is specified
 		config := GetProviderConfig(ProviderCustom)
 		if config != nil {
-			return config.GetServiceType()
+			return config.Name
 		}
-		return "aws_s3"
+		return ProviderCustom
 	}
 
 	// Use the unified provider system to detect service type
@@ -103,39 +99,9 @@ func (c *ClientConfig) detectServiceType() string {
 	// Get the provider config and return its service type
 	config := GetProviderConfig(detectedProvider)
 	if config != nil {
-		return config.GetServiceType()
+		return config.Name
 	}
 
 	// Fallback to Custom if provider config not found
-	return "aws_s3"
-}
-
-// contains checks if a string contains a substring
-func contains(str, substr string) bool {
-	return len(str) >= len(substr) && (str == substr ||
-		(len(str) > len(substr) &&
-			(str[:len(substr)] == substr ||
-				str[len(str)-len(substr):] == substr ||
-				indexOf(str, substr) >= 0)))
-}
-
-// indexOf returns the index of the first occurrence of substr in str, or -1 if not found
-func indexOf(str, substr string) int {
-	if len(substr) == 0 {
-		return 0
-	}
-	if len(str) < len(substr) {
-		return -1
-	}
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-// GetTimeout returns the timeout as a time.Duration
-func (c *ClientConfig) GetTimeout() time.Duration {
-	return time.Duration(c.Timeout) * time.Second
+	return ProviderCustom
 }
