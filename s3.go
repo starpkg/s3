@@ -452,13 +452,13 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 		option.Expires = &convertedTime
 	}
 
-	var options []*ObjectOptions
+	var opts *ObjectOptions
 	if option.Validate() {
-		options = append(options, option)
+		opts = option
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.PutObject(ctx, bucket, key, contentReader, options...)
+	err := s.client.PutObject(ctx, bucket, key, contentReader, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to put object: %w", err)
 	}
@@ -512,13 +512,13 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 		option.Metadata = &metadataMap
 	}
 
-	var options []*ObjectOptions
+	var opts *ObjectOptions
 	if option.Validate() {
-		options = append(options, option)
+		opts = option
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.PutObjectFromFile(ctx, bucket, key, filePath, options...)
+	err := s.client.PutObjectFromFile(ctx, bucket, key, filePath, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to put object from file: %w", err)
 	}
@@ -635,13 +635,13 @@ func (s *S3ClientStruct) listObjects(thread *starlark.Thread, b *starlark.Builti
 		option.MaxKeys = &maxKeys
 	}
 
-	var options []*ListObjectsOptions
+	var opts *ListObjectsOptions
 	if option.Validate() {
-		options = append(options, option)
+		opts = option
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	result, err := s.client.ListObjects(ctx, bucket, options...)
+	result, err := s.client.ListObjects(ctx, bucket, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to list objects: %w", err)
 	}
@@ -842,13 +842,13 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 		option.Metadata = &metadataMap
 	}
 
-	var options []*ObjectOptions
+	var opts *ObjectOptions
 	if option.Validate() {
-		options = append(options, option)
+		opts = option
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.CopyObject(ctx, srcBucket, srcKey, dstBucket, dstKey, options...)
+	err := s.client.CopyObject(ctx, srcBucket, srcKey, dstBucket, dstKey, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to copy object: %w", err)
 	}

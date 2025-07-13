@@ -271,7 +271,7 @@ func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInf
 }
 
 // PutObject uploads an object to S3
-func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, options ...*ObjectOptions) error {
+func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, opts *ObjectOptions) error {
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -279,10 +279,8 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 	}
 
 	// Apply options
-	for _, opt := range options {
-		if opt != nil {
-			opt.ApplyToPutObject(input)
-		}
+	if opts != nil {
+		opts.ApplyToPutObject(input)
 	}
 
 	_, err := c.client.PutObject(ctx, input)
@@ -294,7 +292,7 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 }
 
 // PutObjectFromFile uploads a file to S3
-func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, options ...*ObjectOptions) error {
+func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, opts *ObjectOptions) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", filePath, err)
@@ -308,10 +306,8 @@ func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath 
 	}
 
 	// Apply options
-	for _, opt := range options {
-		if opt != nil {
-			opt.ApplyToPutObject(input)
-		}
+	if opts != nil {
+		opts.ApplyToPutObject(input)
 	}
 
 	_, err = c.client.PutObject(ctx, input)
@@ -378,16 +374,14 @@ func (c *S3Client) DeleteObject(ctx context.Context, bucket, key string) error {
 }
 
 // ListObjects lists objects in a bucket
-func (c *S3Client) ListObjects(ctx context.Context, bucket string, options ...*ListObjectsOptions) (*ListObjectsResult, error) {
+func (c *S3Client) ListObjects(ctx context.Context, bucket string, opts *ListObjectsOptions) (*ListObjectsResult, error) {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 	}
 
 	// Apply options
-	for _, opt := range options {
-		if opt != nil {
-			opt.ApplyToListObjects(input)
-		}
+	if opts != nil {
+		opts.ApplyToListObjects(input)
 	}
 
 	result, err := c.client.ListObjectsV2(ctx, input)
@@ -528,7 +522,7 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *
 }
 
 // CopyObject copies an object from one location to another
-func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, options ...*ObjectOptions) error {
+func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts *ObjectOptions) error {
 	copySource := fmt.Sprintf("%s/%s", srcBucket, srcKey)
 	input := &s3.CopyObjectInput{
 		Bucket:     aws.String(dstBucket),
@@ -537,10 +531,8 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 	}
 
 	// Apply options
-	for _, opt := range options {
-		if opt != nil {
-			opt.ApplyToCopyObject(input)
-		}
+	if opts != nil {
+		opts.ApplyToCopyObject(input)
 	}
 
 	_, err := c.client.CopyObject(ctx, input)
