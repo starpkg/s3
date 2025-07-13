@@ -129,9 +129,6 @@ func (m *Module) LoadModule() starlet.ModuleLoader {
 	// Module functions
 	additionalFuncs := starlark.StringDict{
 		"create_client":          starlark.NewBuiltin(ModuleName+".create_client", m.starCreateClient),
-		"parse_s3_url":           starlark.NewBuiltin(ModuleName+".parse_s3_url", starParseS3URL),
-		"generate_s3_url":        starlark.NewBuiltin(ModuleName+".generate_s3_url", starGenerateS3URL),
-		"get_public_url":         starlark.NewBuiltin(ModuleName+".get_public_url", starGetPublicURL),
 		"validate_bucket_name":   starlark.NewBuiltin(ModuleName+".validate_bucket_name", starValidateBucketName),
 		"validate_object_key":    starlark.NewBuiltin(ModuleName+".validate_object_key", starValidateObjectKey),
 		"get_supported_services": starlark.NewBuiltin(ModuleName+".get_supported_services", starGetSupportedServices),
@@ -456,7 +453,7 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 	}
 
 	var options []*ObjectOptions
-	if option.validate() {
+	if option.Validate() {
 		options = append(options, option)
 	}
 
@@ -516,7 +513,7 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 	}
 
 	var options []*ObjectOptions
-	if option.validate() {
+	if option.Validate() {
 		options = append(options, option)
 	}
 
@@ -639,7 +636,7 @@ func (s *S3ClientStruct) listObjects(thread *starlark.Thread, b *starlark.Builti
 	}
 
 	var options []*ListObjectsOptions
-	if option.validate() {
+	if option.Validate() {
 		options = append(options, option)
 	}
 
@@ -846,7 +843,7 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 	}
 
 	var options []*ObjectOptions
-	if option.validate() {
+	if option.Validate() {
 		options = append(options, option)
 	}
 
@@ -938,76 +935,6 @@ func starGetSupportedServices(thread *starlark.Thread, b *starlark.Builtin, args
 		return none, err
 	}
 
-	services := getSupportedServices()
+	services := GetAllProviders()
 	return dataconv.Marshal(services)
-}
-
-// starParseS3URL parses an S3 URL and returns bucket, key, and service type
-func starParseS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var s3URL string
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "url", &s3URL); err != nil {
-		return none, err
-	}
-
-	bucket, key, serviceType, err := ParseURLWithProvider(s3URL, "")
-	if err != nil {
-		return none, fmt.Errorf("failed to parse S3 URL: %w", err)
-	}
-
-	result := starlark.NewDict(3)
-	result.SetKey(starlark.String("bucket"), starlark.String(bucket))
-	result.SetKey(starlark.String("key"), starlark.String(key))
-	result.SetKey(starlark.String("service_type"), starlark.String(serviceType))
-
-	return result, nil
-}
-
-// starGenerateS3URL generates an S3 URL from bucket and key
-func starGenerateS3URL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var (
-		bucket = ""
-		key    = ""
-	)
-
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"bucket", &bucket,
-		"key", &key,
-	); err != nil {
-		return none, err
-	}
-
-	var s3URL string
-	if key == "" {
-		s3URL = fmt.Sprintf("s3://%s", bucket)
-	} else {
-		s3URL = fmt.Sprintf("s3://%s/%s", bucket, key)
-	}
-
-	return starlark.String(s3URL), nil
-}
-
-// starGetPublicURL generates a public HTTP URL for an object
-func starGetPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var (
-		bucket      = ""
-		key         = ""
-		region      = "us-east-1"
-		endpoint    = ""
-		useSSL      = true
-		serviceType = "aws"
-	)
-
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"bucket", &bucket,
-		"key", &key,
-		"region?", &region,
-		"endpoint?", &endpoint,
-		"use_ssl?", &useSSL,
-		"service_type?", &serviceType,
-	); err != nil {
-		return none, err
-	}
-
-	url := GenerateURLWithProvider(bucket, key, region, endpoint, useSSL, serviceType)
-	return starlark.String(url), nil
 }

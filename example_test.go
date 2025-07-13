@@ -73,21 +73,9 @@ test_client_creation()
 func TestS3UtilityFunctions(t *testing.T) {
 	// Test utility functions
 	script := `
-load("s3", "parse_s3_url", "generate_s3_url", "validate_bucket_name", "validate_object_key", "get_supported_services")
+load("s3", "validate_bucket_name", "validate_object_key", "get_supported_services")
 
 def test_utility_functions():
-    # Test S3 URL parsing
-    result = parse_s3_url("s3://my-bucket/path/to/file.txt")
-    if result["bucket"] != "my-bucket":
-        fail("URL parsing failed for bucket")
-    if result["key"] != "path/to/file.txt":
-        fail("URL parsing failed for key")
-
-    # Test S3 URL generation
-    url = generate_s3_url("test-bucket", "test-key.txt")
-    if url != "s3://test-bucket/test-key.txt":
-        fail("URL generation failed")
-
     # Test bucket name validation
     if not validate_bucket_name("valid-bucket-name"):
         fail("Valid bucket name rejected")
@@ -300,145 +288,6 @@ def test_enhanced_object_operations():
     print("All enhanced object operation methods are available!")
 
 test_enhanced_object_operations()
-`
-
-	// Run the script
-	runner := starlet.NewDefault()
-	loaders := make(map[string]starlet.ModuleLoader)
-	loaders[ModuleName] = NewModule().LoadModule()
-	runner.SetLazyloadModules(loaders)
-
-	runner.SetScriptContent([]byte(script))
-	_, err := runner.Run()
-	if err != nil {
-		t.Fatalf("Script execution failed: %v", err)
-	}
-}
-
-func TestS3URLParsing(t *testing.T) {
-	// Test different URL formats with service detection
-	script := `
-load("s3", "parse_s3_url")
-
-def test_url_parsing():
-    # Test s3:// URL
-    result = parse_s3_url("s3://my-bucket/path/to/file.txt")
-    if result["bucket"] != "my-bucket" or result["key"] != "path/to/file.txt":
-        fail("s3:// URL parsing failed")
-
-    # Test s3:// URL without key
-    result = parse_s3_url("s3://my-bucket")
-    if result["bucket"] != "my-bucket" or result["key"] != "":
-        fail("s3:// URL without key parsing failed")
-
-    # Test HTTPS URL (virtual-hosted style)
-    result = parse_s3_url("https://my-bucket.s3.amazonaws.com/path/to/file.txt")
-    if result["bucket"] != "my-bucket" or result["key"] != "path/to/file.txt":
-        fail("HTTPS virtual-hosted URL parsing failed")
-    if result["service_type"] != "aws":
-        fail("AWS service type detection failed")
-
-    # Test HTTPS URL (path style)
-    result = parse_s3_url("https://s3.amazonaws.com/my-bucket/path/to/file.txt")
-    if result["bucket"] != "my-bucket" or result["key"] != "path/to/file.txt":
-        fail("HTTPS path-style URL parsing failed")
-
-    print("All URL parsing tests passed!")
-
-test_url_parsing()
-`
-
-	// Run the script
-	runner := starlet.NewDefault()
-	loaders := make(map[string]starlet.ModuleLoader)
-	loaders[ModuleName] = NewModule().LoadModule()
-	runner.SetLazyloadModules(loaders)
-
-	runner.SetScriptContent([]byte(script))
-	_, err := runner.Run()
-	if err != nil {
-		t.Fatalf("Script execution failed: %v", err)
-	}
-}
-
-func TestS3MultiProviderURLParsing(t *testing.T) {
-	// Test URL parsing for various S3-compatible providers
-	script := `
-load("s3", "parse_s3_url")
-
-def test_multi_provider_url_parsing():
-    # Test DigitalOcean Spaces
-    result = parse_s3_url("https://my-bucket.nyc3.digitaloceanspaces.com/file.txt")
-    if result["bucket"] != "my-bucket" or result["service_type"] != "digitalocean":
-        fail("DigitalOcean Spaces URL parsing failed")
-
-    # Test Cloudflare R2
-    result = parse_s3_url("https://account-id.r2.cloudflarestorage.com/my-bucket/file.txt")
-    if result["bucket"] != "my-bucket" or result["service_type"] != "cloudflare":
-        fail("Cloudflare R2 URL parsing failed")
-
-    # Test MinIO (localhost)
-    result = parse_s3_url("http://localhost:9000/my-bucket/file.txt")
-    if result["bucket"] != "my-bucket" or result["service_type"] != "minio":
-        fail("MinIO URL parsing failed")
-
-    # Test Wasabi
-    result = parse_s3_url("https://s3.us-east-1.wasabisys.com/my-bucket/file.txt")
-    if result["bucket"] != "my-bucket" or result["service_type"] != "wasabi":
-        fail("Wasabi URL parsing failed")
-
-    # Test Google Cloud Storage
-    result = parse_s3_url("https://storage.googleapis.com/my-bucket/file.txt")
-    if result["bucket"] != "my-bucket" or result["service_type"] != "google":
-        fail("Google Cloud Storage URL parsing failed")
-
-    print("All multi-provider URL parsing tests passed!")
-
-test_multi_provider_url_parsing()
-`
-
-	// Run the script
-	runner := starlet.NewDefault()
-	loaders := make(map[string]starlet.ModuleLoader)
-	loaders[ModuleName] = NewModule().LoadModule()
-	runner.SetLazyloadModules(loaders)
-
-	runner.SetScriptContent([]byte(script))
-	_, err := runner.Run()
-	if err != nil {
-		t.Fatalf("Script execution failed: %v", err)
-	}
-}
-
-func TestS3PublicURLGeneration(t *testing.T) {
-	// Test public URL generation with service type support
-	script := `
-load("s3", "get_public_url")
-
-def test_public_url_generation():
-    # Test AWS S3 URL generation
-    url = get_public_url("my-bucket", "file.txt", service_type="aws", region="us-west-2")
-    if "amazonaws.com" not in url:
-        fail("AWS URL generation failed")
-
-    # Test DigitalOcean Spaces URL generation
-    url = get_public_url("my-bucket", "file.txt", service_type="digitalocean", region="nyc3")
-    if "digitaloceanspaces.com" not in url:
-        fail("DigitalOcean URL generation failed")
-
-    # Test custom endpoint
-    url = get_public_url("my-bucket", "file.txt", endpoint="localhost:9000", use_ssl=False)
-    if not url.startswith("http://localhost:9000"):
-        fail("Custom endpoint URL generation failed")
-
-    # Test MinIO service type
-    url = get_public_url("my-bucket", "file.txt", service_type="minio")
-    if "localhost:9000" not in url:
-        fail("MinIO URL generation failed")
-
-    print("All public URL generation tests passed!")
-
-test_public_url_generation()
 `
 
 	// Run the script

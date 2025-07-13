@@ -9,32 +9,6 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// parseS3URL parses an S3 URL and returns bucket and key components
-// Supports various S3-compatible services including AWS, MinIO, DigitalOcean, Cloudflare R2, etc.
-func parseS3URL(s3URL string) (bucket, key string, err error) {
-	if s3URL == "" {
-		return "", "", fmt.Errorf("S3 URL cannot be empty")
-	}
-
-	// Use the unified provider system
-	bucket, key, _, err = ParseURLWithProvider(s3URL, "")
-	return bucket, key, err
-}
-
-// generateS3URL generates an S3 URL from bucket and key
-func generateS3URL(bucket, key string) string {
-	if key == "" {
-		return fmt.Sprintf("s3://%s", bucket)
-	}
-	return fmt.Sprintf("s3://%s/%s", bucket, key)
-}
-
-// getPublicURL generates a public HTTP URL for an S3 object
-func getPublicURL(bucket, key, region, endpoint string, useSSL bool, serviceType string) string {
-	// Use the unified provider system
-	return GenerateURLWithProvider(bucket, key, region, endpoint, useSSL, serviceType)
-}
-
 // validateBucketName validates S3 bucket name according to AWS rules
 func validateBucketName(bucket string) error {
 	if bucket == "" {
@@ -93,11 +67,6 @@ func validateObjectKey(key string) error {
 	}
 
 	return nil
-}
-
-// getSupportedServices returns a list of supported S3-compatible services
-func getSupportedServices() []string {
-	return GetAllProviders()
 }
 
 // ServiceConfig contains configuration for known S3-compatible services

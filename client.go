@@ -31,7 +31,7 @@ func NewS3Client(ctx context.Context, clientConfig *ClientConfig) (*S3Client, er
 	}
 
 	// Validate configuration
-	if err := clientConfig.ValidateConfig(); err != nil {
+	if err := clientConfig.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid client configuration: %w", err)
 	}
 
@@ -466,7 +466,7 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 // SetObjectInfo sets metadata and other properties for an existing object
 func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *ObjectOptions) error {
 	// Return early if no options provided
-	if opts == nil || !opts.validate() {
+	if opts == nil || !opts.Validate() {
 		return nil
 	}
 
