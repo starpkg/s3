@@ -17,15 +17,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-// S3Client wraps the AWS S3 client with configuration
-type S3Client struct {
+// Client wraps the AWS S3 client with configuration
+type Client struct {
 	client *s3.Client
 	config *ClientConfig
 	mu     sync.RWMutex
 }
 
-// NewS3Client creates a new S3 client with the provided configuration
-func NewS3Client(ctx context.Context, clientConfig *ClientConfig) (*S3Client, error) {
+// NewClient creates a new S3 client with the provided configuration
+func NewClient(ctx context.Context, clientConfig *ClientConfig) (*Client, error) {
 	if clientConfig == nil {
 		return nil, fmt.Errorf("client config cannot be nil")
 	}
@@ -54,7 +54,7 @@ func NewS3Client(ctx context.Context, clientConfig *ClientConfig) (*S3Client, er
 		})
 	}
 
-	return &S3Client{
+	return &Client{
 		client: s3Client,
 		config: clientConfig,
 	}, nil
@@ -87,14 +87,14 @@ func createAWSConfig(ctx context.Context, clientConfig *ClientConfig) (aws.Confi
 }
 
 // GetConfig returns the client configuration
-func (c *S3Client) GetConfig() *ClientConfig {
+func (c *Client) GetConfig() *ClientConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.config
 }
 
 // CreateBucket creates a new S3 bucket
-func (c *S3Client) CreateBucket(ctx context.Context, bucket string, region ...string) error {
+func (c *Client) CreateBucket(ctx context.Context, bucket string, region ...string) error {
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucket),
 	}
@@ -118,7 +118,7 @@ func (c *S3Client) CreateBucket(ctx context.Context, bucket string, region ...st
 }
 
 // DeleteBucket deletes an S3 bucket
-func (c *S3Client) DeleteBucket(ctx context.Context, bucket string, force bool) error {
+func (c *Client) DeleteBucket(ctx context.Context, bucket string, force bool) error {
 	// If force is true, delete all objects in the bucket first
 	if force {
 		if err := c.deleteAllObjects(ctx, bucket); err != nil {
@@ -139,7 +139,7 @@ func (c *S3Client) DeleteBucket(ctx context.Context, bucket string, force bool) 
 }
 
 // ListBuckets lists all S3 buckets
-func (c *S3Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
+func (c *Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
 	input := &s3.ListBucketsInput{}
 
 	result, err := c.client.ListBuckets(ctx, input)
@@ -159,7 +159,7 @@ func (c *S3Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
 }
 
 // BucketExists checks if a bucket exists
-func (c *S3Client) BucketExists(ctx context.Context, bucket string) (bool, error) {
+func (c *Client) BucketExists(ctx context.Context, bucket string) (bool, error) {
 	input := &s3.HeadBucketInput{
 		Bucket: aws.String(bucket),
 	}
@@ -177,7 +177,7 @@ func (c *S3Client) BucketExists(ctx context.Context, bucket string) (bool, error
 }
 
 // GetBucketInfo gets information about a bucket
-func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo, error) {
+func (c *Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo, error) {
 	// Check if bucket exists
 	exists, err := c.BucketExists(ctx, bucket)
 	if err != nil {
@@ -271,7 +271,7 @@ func (c *S3Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInf
 }
 
 // PutObject uploads an object to S3
-func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, opts *ObjectOptions) error {
+func (c *Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, opts *ObjectOptions) error {
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -292,7 +292,7 @@ func (c *S3Client) PutObject(ctx context.Context, bucket, key string, body io.Re
 }
 
 // PutObjectFromFile uploads a file to S3
-func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, opts *ObjectOptions) error {
+func (c *Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath string, opts *ObjectOptions) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", filePath, err)
@@ -319,7 +319,7 @@ func (c *S3Client) PutObjectFromFile(ctx context.Context, bucket, key, filePath 
 }
 
 // GetObject downloads an object from S3
-func (c *S3Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
+func (c *Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -334,7 +334,7 @@ func (c *S3Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCl
 }
 
 // GetObjectToFile downloads an object from S3 to a file
-func (c *S3Client) GetObjectToFile(ctx context.Context, bucket, key, filePath string) error {
+func (c *Client) GetObjectToFile(ctx context.Context, bucket, key, filePath string) error {
 	// Get the object
 	body, err := c.GetObject(ctx, bucket, key)
 	if err != nil {
@@ -359,7 +359,7 @@ func (c *S3Client) GetObjectToFile(ctx context.Context, bucket, key, filePath st
 }
 
 // DeleteObject deletes an object from S3
-func (c *S3Client) DeleteObject(ctx context.Context, bucket, key string) error {
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string) error {
 	input := &s3.DeleteObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -374,7 +374,7 @@ func (c *S3Client) DeleteObject(ctx context.Context, bucket, key string) error {
 }
 
 // ListObjects lists objects in a bucket
-func (c *S3Client) ListObjects(ctx context.Context, bucket string, opts *ListObjectsOptions) (*ListObjectsResult, error) {
+func (c *Client) ListObjects(ctx context.Context, bucket string, opts *ListObjectsOptions) (*ListObjectsResult, error) {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 	}
@@ -417,7 +417,7 @@ func (c *S3Client) ListObjects(ctx context.Context, bucket string, opts *ListObj
 }
 
 // ObjectExists checks if an object exists in S3
-func (c *S3Client) ObjectExists(ctx context.Context, bucket, key string) (bool, error) {
+func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, error) {
 	input := &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -436,7 +436,7 @@ func (c *S3Client) ObjectExists(ctx context.Context, bucket, key string) (bool, 
 }
 
 // GetObjectInfo gets information about an object
-func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*ObjectInfo, error) {
+func (c *Client) GetObjectInfo(ctx context.Context, bucket, key string) (*ObjectInfo, error) {
 	input := &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -458,7 +458,7 @@ func (c *S3Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Obje
 }
 
 // SetObjectInfo sets metadata and other properties for an existing object
-func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *ObjectOptions) error {
+func (c *Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *ObjectOptions) error {
 	// Return early if no options provided
 	if opts == nil || !opts.Validate() {
 		return nil
@@ -522,7 +522,7 @@ func (c *S3Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *
 }
 
 // CopyObject copies an object from one location to another
-func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts *ObjectOptions) error {
+func (c *Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts *ObjectOptions) error {
 	copySource := fmt.Sprintf("%s/%s", srcBucket, srcKey)
 	input := &s3.CopyObjectInput{
 		Bucket:     aws.String(dstBucket),
@@ -544,7 +544,7 @@ func (c *S3Client) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket,
 }
 
 // PresignURL generates a pre-signed URL for temporary access to an object
-func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresInSec int, method string) (string, error) {
+func (c *Client) PresignURL(ctx context.Context, bucket, key string, expiresInSec int, method string) (string, error) {
 	// Create presign client
 	presignClient := s3.NewPresignClient(c.client)
 
@@ -591,7 +591,7 @@ func (c *S3Client) PresignURL(ctx context.Context, bucket, key string, expiresIn
 }
 
 // GetPublicURL generates a public HTTP URL for an object using client configuration
-func (c *S3Client) GetPublicURL(bucket, key string) string {
+func (c *Client) GetPublicURL(bucket, key string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -599,7 +599,7 @@ func (c *S3Client) GetPublicURL(bucket, key string) string {
 }
 
 // deleteAllObjects deletes all objects in a bucket (helper for force delete)
-func (c *S3Client) deleteAllObjects(ctx context.Context, bucket string) error {
+func (c *Client) deleteAllObjects(ctx context.Context, bucket string) error {
 	// List all objects
 	listInput := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),

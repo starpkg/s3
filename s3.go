@@ -203,13 +203,13 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 
 	// Create the client
 	ctx := dataconv.GetThreadContext(thread)
-	client, err := NewS3Client(ctx, config)
+	client, err := NewClient(ctx, config)
 	if err != nil {
 		return none, fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
 	// Create the wrapper and return it as a Starlark struct
-	wrapper := &S3ClientStruct{client: client}
+	wrapper := &ClientWrapper{client: client}
 	return wrapper.Struct(), nil
 }
 
@@ -249,13 +249,13 @@ func getInt64ConfigValue(moduleDefault, override int64) int64 {
 	return moduleDefault
 }
 
-// S3ClientStruct wraps the S3Client for Starlark
-type S3ClientStruct struct {
-	client *S3Client
+// ClientWrapper wraps the S3Client for Starlark
+type ClientWrapper struct {
+	client *Client
 }
 
 // Struct converts the S3Client to a Starlark struct
-func (s *S3ClientStruct) Struct() *starlarkstruct.Struct {
+func (s *ClientWrapper) Struct() *starlarkstruct.Struct {
 	return starlarkstruct.FromStringDict(starlark.String("S3Client"), starlark.StringDict{
 		// Bucket operations
 		"create_bucket":   starlark.NewBuiltin("s3.create_bucket", s.createBucket),
@@ -281,7 +281,7 @@ func (s *S3ClientStruct) Struct() *starlarkstruct.Struct {
 }
 
 // createBucket creates a new S3 bucket
-func (s *S3ClientStruct) createBucket(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) createBucket(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		region = ""
@@ -312,7 +312,7 @@ func (s *S3ClientStruct) createBucket(thread *starlark.Thread, b *starlark.Built
 }
 
 // deleteBucket deletes an S3 bucket
-func (s *S3ClientStruct) deleteBucket(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) deleteBucket(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		force  = false
@@ -335,7 +335,7 @@ func (s *S3ClientStruct) deleteBucket(thread *starlark.Thread, b *starlark.Built
 }
 
 // listBuckets lists all S3 buckets
-func (s *S3ClientStruct) listBuckets(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) listBuckets(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs); err != nil {
 		return none, err
 	}
@@ -350,7 +350,7 @@ func (s *S3ClientStruct) listBuckets(thread *starlark.Thread, b *starlark.Builti
 }
 
 // bucketExists checks if a bucket exists
-func (s *S3ClientStruct) bucketExists(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) bucketExists(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var bucket string
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "bucket", &bucket); err != nil {
 		return none, err
@@ -366,7 +366,7 @@ func (s *S3ClientStruct) bucketExists(thread *starlark.Thread, b *starlark.Built
 }
 
 // getBucketInfo gets comprehensive information about a bucket
-func (s *S3ClientStruct) getBucketInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) getBucketInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var bucket string
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "bucket", &bucket); err != nil {
 		return none, err
@@ -382,7 +382,7 @@ func (s *S3ClientStruct) getBucketInfo(thread *starlark.Thread, b *starlark.Buil
 }
 
 // putObject uploads an object to S3
-func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket          = ""
 		key             = ""
@@ -467,7 +467,7 @@ func (s *S3ClientStruct) putObject(thread *starlark.Thread, b *starlark.Builtin,
 }
 
 // putObjectFile uploads a file directly to S3
-func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket          = ""
 		key             = ""
@@ -527,7 +527,7 @@ func (s *S3ClientStruct) putObjectFile(thread *starlark.Thread, b *starlark.Buil
 }
 
 // getObject downloads an object from S3
-func (s *S3ClientStruct) getObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) getObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		key    = ""
@@ -557,7 +557,7 @@ func (s *S3ClientStruct) getObject(thread *starlark.Thread, b *starlark.Builtin,
 }
 
 // getObjectFile downloads an object from S3 to a local file
-func (s *S3ClientStruct) getObjectFile(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) getObjectFile(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket   = ""
 		key      = ""
@@ -582,7 +582,7 @@ func (s *S3ClientStruct) getObjectFile(thread *starlark.Thread, b *starlark.Buil
 }
 
 // deleteObject deletes an object from S3
-func (s *S3ClientStruct) deleteObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) deleteObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		key    = ""
@@ -605,7 +605,7 @@ func (s *S3ClientStruct) deleteObject(thread *starlark.Thread, b *starlark.Built
 }
 
 // listObjects lists objects in an S3 bucket
-func (s *S3ClientStruct) listObjects(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) listObjects(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket    = ""
 		prefix    = ""
@@ -650,7 +650,7 @@ func (s *S3ClientStruct) listObjects(thread *starlark.Thread, b *starlark.Builti
 }
 
 // objectExists checks if an object exists
-func (s *S3ClientStruct) objectExists(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) objectExists(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		key    = ""
@@ -673,7 +673,7 @@ func (s *S3ClientStruct) objectExists(thread *starlark.Thread, b *starlark.Built
 }
 
 // getObjectInfo gets metadata about an object
-func (s *S3ClientStruct) getObjectInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) getObjectInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		key    = ""
@@ -696,7 +696,7 @@ func (s *S3ClientStruct) getObjectInfo(thread *starlark.Thread, b *starlark.Buil
 }
 
 // setObjectInfo sets metadata and other object properties for an object
-func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) setObjectInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket             = ""
 		key                = ""
@@ -795,7 +795,7 @@ func (s *S3ClientStruct) setObjectInfo(thread *starlark.Thread, b *starlark.Buil
 }
 
 // copyObject copies an object from one location to another
-func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) copyObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		srcBucket       = ""
 		srcKey          = ""
@@ -857,7 +857,7 @@ func (s *S3ClientStruct) copyObject(thread *starlark.Thread, b *starlark.Builtin
 }
 
 // presignURL generates a pre-signed URL for temporary access to an object
-func (s *S3ClientStruct) presignURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) presignURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket    = ""
 		key       = ""
@@ -884,7 +884,7 @@ func (s *S3ClientStruct) presignURL(thread *starlark.Thread, b *starlark.Builtin
 }
 
 // getPublicURL generates a public HTTP URL for an object using client configuration
-func (s *S3ClientStruct) getPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (s *ClientWrapper) getPublicURL(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		bucket = ""
 		key    = ""

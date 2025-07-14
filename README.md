@@ -187,6 +187,7 @@ The module supports these S3-compatible services with automatic endpoint detecti
 To add support for a new S3-compatible service provider, follow these steps:
 
 #### 1. Add Provider Constants
+
 Define a new provider constant in `provider.go`:
 
 ```go
@@ -197,6 +198,7 @@ const (
 ```
 
 #### 2. Configure Provider Settings
+
 Add a new provider configuration in the `providerConfigs` map:
 
 ```go
@@ -231,6 +233,7 @@ ProviderNewService: {
 ```
 
 #### 3. Test Integration
+
 Create test cases to verify URL parsing and generation:
 
 ```go
@@ -251,6 +254,7 @@ testCases := []struct {
 ```
 
 #### 4. Update Documentation
+
 Add the new provider to the supported services table above and create usage examples.
 
 #### Integration Requirements
@@ -278,52 +282,67 @@ Example implementation can be found in the existing provider configurations in `
 ### Client Creation
 
 #### `create_client(**kwargs)`
+
 Creates a new S3 client with the specified configuration.
 
 **Parameters:**
+
 - All configuration options listed above
 
 **Returns:**
+
 - S3 client object with bucket and object operation methods
 
 ### Bucket Operations
 
 #### `client.create_bucket(bucket, region=None)`
+
 Creates a new S3 bucket.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `region` (string, optional): Bucket region
 
 #### `client.delete_bucket(bucket, force=False)`
+
 Deletes an S3 bucket.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `force` (bool): If True, deletes all objects first
 
 #### `client.list_buckets()`
+
 Lists all buckets in the account.
 
 **Returns:**
+
 - List of bucket information dictionaries
 
 #### `client.bucket_exists(bucket)`
+
 Checks if a bucket exists.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 
 **Returns:**
+
 - Boolean indicating if bucket exists
 
 #### `client.get_bucket_info(bucket)`
+
 Gets comprehensive information about a bucket.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 
 **Returns:**
+
 - Dictionary containing detailed bucket information:
   - `name` (string): Bucket name
   - `region` (string): Bucket region
@@ -338,9 +357,11 @@ Gets comprehensive information about a bucket.
 ### Object Operations
 
 #### `client.put_object(bucket, key, content, **kwargs)`
+
 Uploads an object to S3.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 - `content` (string): Object content
@@ -352,9 +373,11 @@ Uploads an object to S3.
 - `expires` (string, optional): Expiration date (RFC3339 format)
 
 #### `client.put_object_file(bucket, key, file_path, **kwargs)`
+
 Uploads a file directly from filesystem to S3.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 - `file_path` (string): Local file path to upload
@@ -364,66 +387,84 @@ Uploads a file directly from filesystem to S3.
 - `content_encoding` (string, optional): Content encoding
 
 #### `client.get_object(bucket, key)`
+
 Downloads an object from S3.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 
 **Returns:**
+
 - String containing object content
 
 #### `client.get_object_file(bucket, key, file_path)`
+
 Downloads an object from S3 directly to filesystem.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 - `file_path` (string): Local file path to save to
 
 #### `client.delete_object(bucket, key)`
+
 Deletes an object from S3.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 
 #### `client.list_objects(bucket, **kwargs)`
+
 Lists objects in a bucket.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `prefix` (string, optional): Object key prefix
 - `delimiter` (string, optional): Delimiter for grouping
 - `max_keys` (int, optional): Maximum number of keys to return
 
 **Returns:**
+
 - Dictionary containing object list and metadata
 
 #### `client.object_exists(bucket, key)`
+
 Checks if an object exists.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 
 **Returns:**
+
 - Boolean indicating if object exists
 
 #### `client.get_object_info(bucket, key)`
+
 Gets metadata about an object.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 
 **Returns:**
+
 - Dictionary containing object metadata
 
 #### `client.set_object_info(bucket, key, **kwargs)`
+
 Sets comprehensive properties for an object by copying it with new metadata.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 - `metadata` (dict, optional): Object metadata
@@ -436,9 +477,11 @@ Sets comprehensive properties for an object by copying it with new metadata.
 - `expires` (string, optional): Expiration date (RFC3339 format)
 
 #### `client.copy_object(src_bucket, src_key, dst_bucket, dst_key, **kwargs)`
+
 Copies an object from one location to another.
 
 **Parameters:**
+
 - `src_bucket` (string): Source bucket name
 - `src_key` (string): Source object key
 - `dst_bucket` (string): Destination bucket name
@@ -449,20 +492,24 @@ Copies an object from one location to another.
 - `content_encoding` (string, optional): New content encoding
 
 #### `client.presign_url(bucket, key, expires_in=3600, method="GET")`
+
 Generates a pre-signed URL for temporary access to an object.
 
 **Purpose**: Creates a temporary URL that allows access to private objects without requiring AWS credentials. Useful for sharing files securely or enabling direct browser uploads/downloads.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 - `expires_in` (int, optional): URL expiration time in seconds. Default: `3600` (1 hour)
 - `method` (string, optional): HTTP method for the URL. Supported: `"GET"`, `"HEAD"`. Default: `"GET"`
 
 **Returns:**
+
 - String containing the pre-signed URL
 
 **Examples:**
+
 ```python
 # Generate a GET URL valid for 1 hour (default)
 download_url = client.presign_url("my-bucket", "private/document.pdf")
@@ -478,6 +525,7 @@ print(f"Share this URL: {download_url}")
 ```
 
 **Security Notes:**
+
 - Pre-signed URLs contain embedded credentials and should be treated as sensitive
 - URLs are only valid for the specified time period
 - Anyone with the URL can access the object using the specified method
@@ -486,31 +534,39 @@ print(f"Share this URL: {download_url}")
 ### Utility Functions
 
 #### `parse_s3_url(url)`
+
 Parses an S3 URL into bucket and key components with automatic service detection.
 
 **Parameters:**
+
 - `url` (string): S3 URL (s3://, http://, or https://)
 
 **Returns:**
+
 - Dictionary with fields:
   - `bucket` (string): Bucket name
   - `key` (string): Object key
   - `service_type` (string): Detected service type
 
 #### `generate_s3_url(bucket, key)`
+
 Generates a standard S3 URL.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 
 **Returns:**
+
 - String containing S3 URL
 
 #### `get_public_url(bucket, key, region="us-east-1", endpoint="", use_ssl=True, service_type="aws")`
+
 Generates a public HTTP URL for an object with multi-provider support.
 
 **Parameters:**
+
 - `bucket` (string): Bucket name
 - `key` (string): Object key
 - `region` (string, optional): S3 region
@@ -519,30 +575,39 @@ Generates a public HTTP URL for an object with multi-provider support.
 - `service_type` (string, optional): Service type for URL format
 
 **Returns:**
+
 - String containing public URL
 
 #### `validate_bucket_name(name)`
+
 Validates an S3 bucket name.
 
 **Parameters:**
+
 - `name` (string): Bucket name to validate
 
 **Returns:**
+
 - Boolean indicating if name is valid
 
 #### `validate_object_key(key)`
+
 Validates an S3 object key.
 
 **Parameters:**
+
 - `key` (string): Object key to validate
 
 **Returns:**
+
 - Boolean indicating if key is valid
 
 #### `get_supported_services()`
+
 Returns a list of supported S3 services.
 
 **Returns:**
+
 - List of supported service type strings
 
 ## 🎯 Examples
@@ -773,6 +838,7 @@ go test -v
 ```
 
 The test suite includes:
+
 - Client creation and configuration tests
 - Utility function tests
 - API method availability tests
@@ -794,4 +860,4 @@ For support, please open an issue on the GitHub repository.
 
 ---
 
-**Made with ❤️ for the Starlark community** 
+**Made with ❤️ for the Starlark community**
