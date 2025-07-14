@@ -123,6 +123,41 @@ print(f"Object count: {bucket_info['object_count']}")
 print(f"Total size: {bucket_info['total_size']} bytes")
 ```
 
+### Working with Time Objects
+
+The S3 module returns time information as proper time.Time objects (from the `time` module) instead of strings. This provides better type safety and more convenient time operations:
+
+```python
+load("s3", "create_client")
+load("time", "now")
+
+client = create_client(
+    access_key="your-access-key",
+    secret_key="your-secret-key",
+    region="us-west-2"
+)
+
+# Get bucket information with time objects
+bucket_info = client.get_bucket_info("my-bucket")
+creation_time = bucket_info["creation_date"]
+
+# Time objects can be compared directly
+current_time = now()
+if creation_time < current_time:
+    print("Bucket was created in the past")
+
+# Get object information with time objects
+obj_info = client.get_object_info("my-bucket", "my-file.txt")
+last_modified = obj_info["last_modified"]
+
+# Format time objects for display
+print(f"Object last modified: {last_modified.format('2006-01-02 15:04:05')}")
+
+# Calculate time differences
+age_seconds = (current_time - last_modified).seconds
+print(f"File is {age_seconds} seconds old")
+```
+
 ## 🧠 Smart Provider Detection
 
 The S3 module features an intelligent, pluggable provider detection system that automatically identifies the correct S3-compatible service based on configuration hints. This eliminates the need to explicitly specify `service_type` in most cases.
@@ -473,7 +508,7 @@ Gets comprehensive information about a bucket.
 - Dictionary containing detailed bucket information:
   - `name` (string): Bucket name
   - `region` (string): Bucket region
-  - `creation_date` (string): Creation timestamp
+  - `creation_date` (time.Time): Creation timestamp as a time object
   - `versioning_status` (string): Versioning configuration
   - `public_access_blocked` (bool): Public access block status
   - `has_policy` (bool): Whether bucket has a policy
@@ -584,7 +619,13 @@ Gets metadata about an object.
 
 **Returns:**
 
-- Dictionary containing object metadata
+- Dictionary containing object metadata:
+  - `key` (string): Object key
+  - `size` (int): Object size in bytes
+  - `last_modified` (time.Time): Last modification timestamp as a time object
+  - `etag` (string): Entity tag (ETag) of the object
+  - `content_type` (string): MIME type of the object
+  - `metadata` (dict): User-defined metadata key-value pairs
 
 #### `client.set_object_info(bucket, key, **kwargs)`
 

@@ -337,7 +337,17 @@ func (s *ClientWrapper) listBuckets(thread *starlark.Thread, b *starlark.Builtin
 		return none, fmt.Errorf("failed to list buckets: %w", err)
 	}
 
-	return dataconv.Marshal(buckets)
+	// Convert slice of BucketInfo to Starlark list manually
+	bucketList := starlark.NewList(make([]starlark.Value, len(buckets)))
+	for i, bucket := range buckets {
+		bucketValue, err := bucket.MarshalStarlark()
+		if err != nil {
+			return none, fmt.Errorf("failed to marshal bucket info: %w", err)
+		}
+		bucketList.SetIndex(i, bucketValue)
+	}
+
+	return bucketList, nil
 }
 
 // bucketExists checks if a bucket exists
@@ -637,7 +647,7 @@ func (s *ClientWrapper) listObjects(thread *starlark.Thread, b *starlark.Builtin
 		return none, fmt.Errorf("failed to list objects: %w", err)
 	}
 
-	return dataconv.Marshal(result)
+	return result.MarshalStarlark()
 }
 
 // objectExists checks if an object exists

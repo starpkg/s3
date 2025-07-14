@@ -9,13 +9,60 @@ import (
 	"sync"
 	"time"
 
+	"github.com/1set/starlet/dataconv"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	startime "go.starlark.net/lib/time"
+	"go.starlark.net/starlark"
 )
+
+// Utility helper functions for Starlark conversions
+
+// timeToStarlark converts time.Time to starlark.Value, returning None for zero time
+func timeToStarlark(t time.Time) starlark.Value {
+	if t.IsZero() {
+		return starlark.None
+	}
+	return startime.Time(t)
+}
+
+// stringMapToStarlark converts map[string]string to starlark.Dict
+func stringMapToStarlark(m map[string]string) *starlark.Dict {
+	dict := &starlark.Dict{}
+	for k, v := range m {
+		dict.SetKey(starlark.String(k), starlark.String(v))
+	}
+	return dict
+}
+
+// stringSliceToStarlark converts []string to starlark.List
+func stringSliceToStarlark(s []string) *starlark.List {
+	values := make([]starlark.Value, len(s))
+	for i, str := range s {
+		values[i] = starlark.String(str)
+	}
+	return starlark.NewList(values)
+}
+
+// tagsToAWSTagSet converts a map[string]string to AWS TagSet
+func tagsToAWSTagSet(tags map[string]string) []types.Tag {
+	if tags == nil || len(tags) == 0 {
+		return nil
+	}
+
+	tagSet := make([]types.Tag, 0, len(tags))
+	for key, value := range tags {
+		tagSet = append(tagSet, types.Tag{
+			Key:   aws.String(key),
+			Value: aws.String(value),
+		})
+	}
+	return tagSet
+}
 
 // Client wraps the AWS S3 client with configuration
 type Client struct {
@@ -464,12 +511,6 @@ func (c *Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *Ob
 		return nil
 	}
 
-	// First, get the current object info
-	currentInfo, err := c.GetObjectInfo(ctx, bucket, key)
-	if err != nil {
-		return fmt.Errorf("failed to get current object info: %w", err)
-	}
-
 	// Create copy input
 	copySource := fmt.Sprintf("%s/%s", bucket, key)
 	input := &s3.CopyObjectInput{
@@ -486,37 +527,29 @@ func (c *Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *Ob
 		input.MetadataDirective = types.MetadataDirectiveCopy
 	}
 
-	_, err = c.client.CopyObject(ctx, input)
+	_, err := c.client.CopyObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to set object info for %s/%s: %w", bucket, key, err)
 	}
 
 	// Handle tags separately if provided
 	if opts.Tags != nil && len(*opts.Tags) > 0 {
-		// Convert tags to the format expected by PutObjectTagging
-		tagSet := make([]types.Tag, 0, len(*opts.Tags))
-		for key, value := range *opts.Tags {
-			tagSet = append(tagSet, types.Tag{
-				Key:   aws.String(key),
-				Value: aws.String(value),
-			})
-		}
+		tagSet := tagsToAWSTagSet(*opts.Tags)
+		if tagSet != nil {
+			tagInput := &s3.PutObjectTaggingInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(key),
+				Tagging: &types.Tagging{
+					TagSet: tagSet,
+				},
+			}
 
-		tagInput := &s3.PutObjectTaggingInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-			Tagging: &types.Tagging{
-				TagSet: tagSet,
-			},
-		}
-
-		_, err = c.client.PutObjectTagging(ctx, tagInput)
-		if err != nil {
-			return fmt.Errorf("failed to set object tags for %s/%s: %w", bucket, key, err)
+			_, err = c.client.PutObjectTagging(ctx, tagInput)
+			if err != nil {
+				return fmt.Errorf("failed to set object tags for %s/%s: %w", bucket, key, err)
+			}
 		}
 	}
-
-	_ = currentInfo // Suppress unused variable warning
 
 	return nil
 }
@@ -654,6 +687,26 @@ type BucketInfo struct {
 	TotalSize           int64     `json:"total_size,omitempty"`
 }
 
+// MarshalStarlark implements the Marshaler interface for BucketInfo
+func (b *BucketInfo) MarshalStarlark() (starlark.Value, error) {
+	dict := starlark.NewDict(9)
+
+	dict.SetKey(starlark.String("name"), starlark.String(b.Name))
+	dict.SetKey(starlark.String("creation_date"), timeToStarlark(b.CreationDate))
+	dict.SetKey(starlark.String("region"), starlark.String(b.Region))
+	dict.SetKey(starlark.String("versioning_status"), starlark.String(b.VersioningStatus))
+	dict.SetKey(starlark.String("public_access_blocked"), starlark.Bool(b.PublicAccessBlocked))
+	dict.SetKey(starlark.String("has_policy"), starlark.Bool(b.HasPolicy))
+	dict.SetKey(starlark.String("encryption_enabled"), starlark.Bool(b.EncryptionEnabled))
+	dict.SetKey(starlark.String("object_count"), starlark.MakeInt64(b.ObjectCount))
+	dict.SetKey(starlark.String("total_size"), starlark.MakeInt64(b.TotalSize))
+
+	return dict, nil
+}
+
+// Ensure BucketInfo implements dataconv.Marshaler
+var _ dataconv.Marshaler = (*BucketInfo)(nil)
+
 // ObjectInfo contains information about an S3 object
 type ObjectInfo struct {
 	Key          string            `json:"key"`
@@ -663,6 +716,23 @@ type ObjectInfo struct {
 	ContentType  string            `json:"content_type,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
+
+// MarshalStarlark implements the Marshaler interface for ObjectInfo
+func (o *ObjectInfo) MarshalStarlark() (starlark.Value, error) {
+	dict := starlark.NewDict(6)
+
+	dict.SetKey(starlark.String("key"), starlark.String(o.Key))
+	dict.SetKey(starlark.String("size"), starlark.MakeInt64(o.Size))
+	dict.SetKey(starlark.String("last_modified"), timeToStarlark(o.LastModified))
+	dict.SetKey(starlark.String("etag"), starlark.String(o.ETag))
+	dict.SetKey(starlark.String("content_type"), starlark.String(o.ContentType))
+	dict.SetKey(starlark.String("metadata"), stringMapToStarlark(o.Metadata))
+
+	return dict, nil
+}
+
+// Ensure ObjectInfo implements dataconv.Marshaler
+var _ dataconv.Marshaler = (*ObjectInfo)(nil)
 
 // ListObjectsResult contains the result of a list objects operation
 type ListObjectsResult struct {
@@ -674,3 +744,33 @@ type ListObjectsResult struct {
 	Prefix         string       `json:"prefix,omitempty"`
 	Delimiter      string       `json:"delimiter,omitempty"`
 }
+
+// MarshalStarlark implements the Marshaler interface for ListObjectsResult
+func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
+	dict := starlark.NewDict(7)
+
+	// Convert Contents slice to Starlark list
+	contentsList := starlark.NewList(make([]starlark.Value, len(l.Contents)))
+	for i, obj := range l.Contents {
+		objValue, err := obj.MarshalStarlark()
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal object info: %w", err)
+		}
+		contentsList.SetIndex(i, objValue)
+	}
+	dict.SetKey(starlark.String("contents"), contentsList)
+
+	// Convert CommonPrefixes slice to Starlark list using utility function
+	dict.SetKey(starlark.String("common_prefixes"), stringSliceToStarlark(l.CommonPrefixes))
+
+	dict.SetKey(starlark.String("is_truncated"), starlark.Bool(l.IsTruncated))
+	dict.SetKey(starlark.String("next_marker"), starlark.String(l.NextMarker))
+	dict.SetKey(starlark.String("max_keys"), starlark.MakeInt(l.MaxKeys))
+	dict.SetKey(starlark.String("prefix"), starlark.String(l.Prefix))
+	dict.SetKey(starlark.String("delimiter"), starlark.String(l.Delimiter))
+
+	return dict, nil
+}
+
+// Ensure ListObjectsResult implements dataconv.Marshaler
+var _ dataconv.Marshaler = (*ListObjectsResult)(nil)
