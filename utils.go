@@ -128,71 +128,7 @@ func convertStarlarkStringToTime(timeStr string) (time.Time, error) {
 	return t, nil
 }
 
-// convertStringToBytes converts a string to []byte
-func convertStringToBytes(s string) []byte {
-	if s == "" {
-		return nil
-	}
-	return []byte(s)
-}
-
 // convertMetadataDict converts a Starlark dictionary to metadata map
 func convertMetadataDict(dict *starlark.Dict) (map[string]string, error) {
 	return convertStarlarkDict(dict)
-}
-
-// convertTagsDict converts a Starlark dictionary to tags map
-func convertTagsDict(dict *starlark.Dict) (map[string]string, error) {
-	return convertStarlarkDict(dict)
-}
-
-// validateNonEmptyString validates that a string is not empty
-func validateNonEmptyString(s string, fieldName string) error {
-	if s == "" {
-		return fmt.Errorf("%s cannot be empty", fieldName)
-	}
-	return nil
-}
-
-// validateStringLength validates that a string meets length requirements
-func validateStringLength(s string, fieldName string, minLen, maxLen int) error {
-	if len(s) < minLen {
-		return fmt.Errorf("%s must be at least %d characters long", fieldName, minLen)
-	}
-	if len(s) > maxLen {
-		return fmt.Errorf("%s must be no more than %d characters long", fieldName, maxLen)
-	}
-	return nil
-}
-
-// convertOptionalString converts a string parameter that might be empty
-func convertOptionalString(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-// convertOptionalInt converts an integer parameter that might be zero
-func convertOptionalInt(i int) *int {
-	if i == 0 {
-		return nil
-	}
-	return &i
-}
-
-// convertOptionalInt64 converts an int64 parameter that might be zero
-func convertOptionalInt64(i int64) *int64 {
-	if i == 0 {
-		return nil
-	}
-	return &i
-}
-
-// convertOptionalBool converts a boolean parameter with explicit flag
-func convertOptionalBool(b bool, hasValue bool) *bool {
-	if !hasValue {
-		return nil
-	}
-	return &b
 }

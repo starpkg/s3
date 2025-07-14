@@ -86,6 +86,9 @@ type ProviderConfig struct {
 	SupportsPathStyle     bool
 	RequiresAccountID     bool
 	RequiresNamespace     bool
+
+	// Detection rules for smart provider detection
+	DetectionRules []DetectionRule
 }
 
 // GetProviderConfig returns the configuration for a specific provider
@@ -107,64 +110,43 @@ func GetAllProviders() []string {
 	return providers
 }
 
-// DetectProviderFromURL attempts to detect the provider from a URL
-// Checks providers in a specific order to ensure specific providers are matched before fallback ones
-func DetectProviderFromURL(s3URL string) string {
-	for _, provider := range providerOrder {
-		config, exists := providerConfigs[provider]
-		if !exists {
-			continue
-		}
+// DetectProviderFromConfig uses pluggable detection rules to identify the best provider
+func DetectProviderFromConfig(config *ClientConfig) string {
+	// Collect all detection rules from all providers
+	type providerRule struct {
+		provider string
+		rule     DetectionRule
+	}
 
-		for _, pattern := range config.URLPatterns {
-			if pattern.Pattern.MatchString(s3URL) {
-				return provider
+	var allRules []providerRule
+	for _, providerName := range providerOrder {
+		if providerConfig, exists := providerConfigs[providerName]; exists {
+			for _, rule := range providerConfig.DetectionRules {
+				allRules = append(allRules, providerRule{
+					provider: providerName,
+					rule:     rule,
+				})
 			}
 		}
 	}
 
+	// Sort by priority (lower priority number = higher priority)
+	for i := 0; i < len(allRules)-1; i++ {
+		for j := i + 1; j < len(allRules); j++ {
+			if allRules[i].rule.Priority > allRules[j].rule.Priority {
+				allRules[i], allRules[j] = allRules[j], allRules[i]
+			}
+		}
+	}
+
+	// Test rules in priority order
+	for _, pr := range allRules {
+		if pr.rule.DetectFunc(config) {
+			return pr.provider
+		}
+	}
+
 	return ProviderCustom
-}
-
-// ParseURLWithProvider parses an S3 URL using provider-specific logic
-func ParseURLWithProvider(s3URL string, provider string) (bucket, key string, detectedProvider string, err error) {
-	// Handle s3:// format (universal)
-	if strings.HasPrefix(s3URL, "s3://") {
-		s3URL = strings.TrimPrefix(s3URL, "s3://")
-		parts := strings.SplitN(s3URL, "/", 2)
-		if len(parts) < 1 || parts[0] == "" {
-			return "", "", "", fmt.Errorf("invalid S3 URL: missing bucket name")
-		}
-		bucket = parts[0]
-		if len(parts) > 1 {
-			key = parts[1]
-		}
-		// s3:// URLs don't contain provider-specific information
-		detectedProvider = ProviderCustom
-		if provider != "" {
-			detectedProvider = provider
-		}
-		return bucket, key, detectedProvider, nil
-	}
-
-	// If provider is specified, use its patterns first
-	if provider != "" && provider != ProviderCustom {
-		config := GetProviderConfig(provider)
-		bucket, key, err := parseURLWithConfig(s3URL, config)
-		if err == nil {
-			return bucket, key, provider, nil
-		}
-	}
-
-	// Try to detect provider and parse
-	detectedProvider = DetectProviderFromURL(s3URL)
-	config := GetProviderConfig(detectedProvider)
-	bucket, key, err = parseURLWithConfig(s3URL, config)
-	if err != nil {
-		return "", "", detectedProvider, err
-	}
-
-	return bucket, key, detectedProvider, nil
 }
 
 // parseURLWithConfig parses a URL using a specific provider configuration
@@ -311,6 +293,28 @@ var providerConfigs = map[string]*ProviderConfig{
 			}
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.amazonaws.com", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    10,
+				DetectFunc:  hasEndpointContaining("amazonaws.com"),
+				Description: "AWS S3 endpoint detected",
+			},
+			{
+				Priority:    20,
+				DetectFunc:  hasAccessKeyPattern(`^(?i)AKIA[A-Z0-9]{16}$`),
+				Description: "AWS access key pattern (AKIA) detected",
+			},
+			{
+				Priority:    21,
+				DetectFunc:  hasAccessKeyPattern(`^(?i)ASIA[A-Z0-9]{16}$`),
+				Description: "AWS temporary access key pattern (ASIA) detected",
+			},
+			{
+				Priority:    30,
+				DetectFunc:  hasRegionPattern(`^[a-z]{2,3}-[a-z]+-\d+$`),
+				Description: "AWS region format detected",
+			},
+		},
 	},
 
 	ProviderMinIO: {
@@ -338,6 +342,28 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "localhost:9000", true)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    40,
+				DetectFunc:  hasAccessKeyInList([]string{"minioadmin", "minio"}),
+				Description: "MinIO default access key detected",
+			},
+			{
+				Priority:    50,
+				DetectFunc:  hasEndpointPattern(`^https?://[^/]+:[0-9]+/`),
+				Description: "MinIO endpoint with port detected",
+			},
+			{
+				Priority:    51,
+				DetectFunc:  hasEndpointContaining("localhost"),
+				Description: "MinIO localhost endpoint detected",
+			},
+			{
+				Priority:    52,
+				DetectFunc:  hasEndpointContaining("min.io"),
+				Description: "MinIO domain detected",
+			},
+		},
 	},
 
 	ProviderDigitalOcean: {
@@ -359,6 +385,18 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "{region}.digitaloceanspaces.com", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("digitaloceanspaces.com"),
+				Description: "DigitalOcean Spaces endpoint detected",
+			},
+			{
+				Priority:    35,
+				DetectFunc:  hasRegionInList([]string{"nyc1", "nyc2", "nyc3", "ams2", "ams3", "sfo1", "sfo2", "sfo3", "sgp1", "lon1", "fra1", "tor1", "blr1"}),
+				Description: "DigitalOcean Spaces region detected",
+			},
+		},
 	},
 
 	ProviderLinode: {
@@ -379,6 +417,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		},
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "{region}.linodeobjects.com", false)
+		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("linodeobjects.com"),
+				Description: "Linode Object Storage endpoint detected",
+			},
 		},
 	},
 
@@ -405,6 +450,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.wasabisys.com", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("wasabisys.com"),
+				Description: "Wasabi Hot Cloud Storage endpoint detected",
+			},
+		},
 	},
 
 	ProviderBackblaze: {
@@ -430,6 +482,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.backblazeb2.com", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("backblazeb2.com"),
+				Description: "Backblaze B2 endpoint detected",
+			},
+		},
 	},
 
 	ProviderCloudflare: {
@@ -451,6 +510,23 @@ var providerConfigs = map[string]*ProviderConfig{
 		},
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "{account_id}.r2.cloudflarestorage.com", true)
+		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("r2.cloudflarestorage.com"),
+				Description: "Cloudflare R2 endpoint detected",
+			},
+			{
+				Priority:    15,
+				DetectFunc:  hasExactRegion("auto"),
+				Description: "Cloudflare R2 auto region detected",
+			},
+			{
+				Priority:    25,
+				DetectFunc:  hasAccessKeyPattern(`^[0-9a-fA-F]{32}$`),
+				Description: "Cloudflare R2 access key pattern (32-char hex) detected",
+			},
 		},
 	},
 
@@ -477,6 +553,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.scw.cloud", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("scw.cloud"),
+				Description: "Scaleway Object Storage endpoint detected",
+			},
+		},
 	},
 
 	ProviderAlibaba: {
@@ -502,6 +585,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "oss-{region}.aliyuncs.com", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("aliyuncs.com"),
+				Description: "Alibaba Cloud OSS endpoint detected",
+			},
+		},
 	},
 
 	ProviderGoogle: {
@@ -522,6 +612,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		},
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "storage.googleapis.com", true)
+		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("googleapis.com"),
+				Description: "Google Cloud Storage endpoint detected",
+			},
 		},
 	},
 
@@ -545,6 +642,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "{namespace}.compat.objectstorage.{region}.oraclecloud.com", false)
 		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("oraclecloud.com"),
+				Description: "Oracle Cloud Infrastructure endpoint detected",
+			},
+		},
 	},
 
 	ProviderIBM: {
@@ -565,6 +669,13 @@ var providerConfigs = map[string]*ProviderConfig{
 		},
 		GenerateURL: func(bucket, key, region, endpoint string, useSSL bool) string {
 			return generateStandardURL(bucket, key, region, endpoint, useSSL, "s3.{region}.cloud-object-storage.appdomain.cloud", false)
+		},
+		DetectionRules: []DetectionRule{
+			{
+				Priority:    5,
+				DetectFunc:  hasEndpointContaining("cloud-object-storage.appdomain.cloud"),
+				Description: "IBM Cloud Object Storage endpoint detected",
+			},
 		},
 	},
 

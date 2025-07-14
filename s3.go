@@ -53,13 +53,6 @@ func NewModule() *Module {
 // genConfigOption creates a configuration option with common settings
 func genConfigOption[T any](name, description string, defaultValue T) *base.ConfigOption[T] {
 	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(strings.ReplaceAll(name, "_", "_")))
-	// Also support AWS standard environment variables
-	switch name {
-	case configKeySessionToken:
-		envVar = "AWS_SESSION_TOKEN"
-	case configKeyRegion:
-		envVar = "AWS_DEFAULT_REGION"
-	}
 
 	return base.NewConfigOption(defaultValue).
 		WithName(name).
@@ -70,13 +63,6 @@ func genConfigOption[T any](name, description string, defaultValue T) *base.Conf
 // genSecretConfigOption creates a secret configuration option
 func genSecretConfigOption(name, description, defaultValue string) *base.ConfigOption[string] {
 	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(strings.ReplaceAll(name, "_", "_")))
-	// Also support AWS standard environment variables
-	switch name {
-	case configKeyAccessKey:
-		envVar = "AWS_ACCESS_KEY_ID"
-	case configKeySecretKey:
-		envVar = "AWS_SECRET_ACCESS_KEY"
-	}
 
 	return base.NewConfigOption(defaultValue).
 		WithName(name).
@@ -199,6 +185,11 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		Concurrency:    getIntConfigValue(m.ext.GetInt(configKeyConcurrency), concurrency),
 		EnableLogging:  getBoolConfigValue(m.ext.GetBool(configKeyEnableLogging), enableLogging),
 		UserAgent:      getConfigValue(m.ext.GetString(configKeyUserAgent), userAgent),
+	}
+
+	// Apply smart detection if service type is "auto" or empty
+	if config.ServiceType == "auto" || config.ServiceType == "" {
+		config.ServiceType = config.detectServiceType()
 	}
 
 	// Create the client

@@ -2,6 +2,7 @@ package s3
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -91,29 +92,9 @@ func (c *ClientConfig) Validate() error {
 	return nil
 }
 
-// detectServiceType attempts to detect the service type from the endpoint
+// detectServiceType attempts to detect the service type from available information
 func (c *ClientConfig) detectServiceType() string {
-	if c.Endpoint == "" {
-		// Default to Custom when no endpoint is specified
-		config := GetProviderConfig(ProviderCustom)
-		if config != nil {
-			return config.Name
-		}
-		return ProviderCustom
-	}
-
-	// Use the unified provider system to detect service type
-	testURL := "https://" + c.Endpoint + "/test"
-	detectedProvider := DetectProviderFromURL(testURL)
-
-	// Get the provider config and return its service type
-	config := GetProviderConfig(detectedProvider)
-	if config != nil {
-		return config.Name
-	}
-
-	// Fallback to Custom if provider config not found
-	return ProviderCustom
+	return DetectProviderFromConfig(c)
 }
 
 // ObjectOptions contains options for object operations
@@ -251,5 +232,82 @@ func (o *ListObjectsOptions) ApplyToListObjects(input *s3.ListObjectsV2Input) {
 	}
 	if o.ContinuationToken != nil {
 		input.ContinuationToken = o.ContinuationToken
+	}
+}
+
+// DetectionRule represents a rule for detecting a specific provider
+type DetectionRule struct {
+	// Priority determines the order of evaluation (lower = higher priority)
+	Priority int
+	// DetectFunc returns true if this provider matches the config
+	DetectFunc func(config *ClientConfig) bool
+	// Description explains what this rule detects
+	Description string
+}
+
+// Detection helper functions
+func hasEndpointPattern(pattern string) func(*ClientConfig) bool {
+	compiledPattern := regexp.MustCompile(pattern)
+	return func(config *ClientConfig) bool {
+		if config.Endpoint == "" {
+			return false
+		}
+		testURL := "https://" + config.Endpoint + "/test"
+		return compiledPattern.MatchString(testURL)
+	}
+}
+
+func hasRegionPattern(pattern string) func(*ClientConfig) bool {
+	compiledPattern := regexp.MustCompile(pattern)
+	return func(config *ClientConfig) bool {
+		return config.Region != "" && compiledPattern.MatchString(config.Region)
+	}
+}
+
+func hasRegionInList(regions []string) func(*ClientConfig) bool {
+	return func(config *ClientConfig) bool {
+		if config.Region == "" {
+			return false
+		}
+		regionLower := strings.ToLower(config.Region)
+		for _, region := range regions {
+			if regionLower == strings.ToLower(region) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func hasAccessKeyPattern(pattern string) func(*ClientConfig) bool {
+	compiledPattern := regexp.MustCompile(pattern)
+	return func(config *ClientConfig) bool {
+		return config.AccessKey != "" && compiledPattern.MatchString(config.AccessKey)
+	}
+}
+
+func hasAccessKeyInList(keys []string) func(*ClientConfig) bool {
+	return func(config *ClientConfig) bool {
+		if config.AccessKey == "" {
+			return false
+		}
+		for _, key := range keys {
+			if config.AccessKey == key {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func hasExactRegion(region string) func(*ClientConfig) bool {
+	return func(config *ClientConfig) bool {
+		return strings.ToLower(config.Region) == strings.ToLower(region)
+	}
+}
+
+func hasEndpointContaining(substring string) func(*ClientConfig) bool {
+	return func(config *ClientConfig) bool {
+		return config.Endpoint != "" && strings.Contains(strings.ToLower(config.Endpoint), strings.ToLower(substring))
 	}
 }

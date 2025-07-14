@@ -19,7 +19,8 @@ The S3 module provides a comprehensive, easy-to-use interface for interacting wi
 - **🔗 Smart URL Handling**: Multi-provider URL parsing and generation with automatic service detection
 - **🛠️ Rich Utility Functions**: Bucket validation, object key validation, and service configuration helpers
 - **⚡ High Performance**: Built on AWS SDK v2 with configurable concurrency and retry policies
-- **🔍 Intelligent Configuration**: Auto-detection of service types, environment variable integration, and smart defaults
+- **🧠 Smart Provider Detection**: Intelligent, pluggable auto-detection of service providers based on endpoints, regions, and access key patterns
+- **🔍 Intelligent Configuration**: Environment variable integration and smart defaults
 - **🎯 Starlark Native**: Designed specifically for Starlark with proper error handling and type safety
 
 ## 🚀 Quick Start
@@ -30,11 +31,10 @@ The S3 module provides a comprehensive, easy-to-use interface for interacting wi
 # Load the S3 module
 load("s3", "create_client")
 
-# Create a client for AWS S3
+# Create a client with smart provider detection
 client = create_client(
-    service_type="aws",
     region="us-west-2",
-    access_key="your-access-key",
+    access_key="AKIAIOSFODNN7EXAMPLE",  # Automatically detects AWS S3
     secret_key="your-secret-key",
 )
 
@@ -121,6 +121,133 @@ print(f"Created: {bucket_info['creation_date']}")
 print(f"Versioning: {bucket_info['versioning_status']}")
 print(f"Object count: {bucket_info['object_count']}")
 print(f"Total size: {bucket_info['total_size']} bytes")
+```
+
+## 🧠 Smart Provider Detection
+
+The S3 module features an intelligent, pluggable provider detection system that automatically identifies the correct S3-compatible service based on configuration hints. This eliminates the need to explicitly specify `service_type` in most cases.
+
+### Automatic Detection
+
+Simply omit the `service_type` parameter or set it to `"auto"` to enable smart detection:
+
+```python
+load("s3", "create_client")
+
+# Smart detection based on endpoint
+client = create_client(
+    endpoint="https://e0ed38ec5a87ac84d936841eee7336b2.r2.cloudflarestorage.com",
+    access_key="your-key",
+    secret_key="your-secret"
+)
+# ✅ Automatically detects Cloudflare R2
+
+# Smart detection based on region
+client = create_client(
+    region="auto",  # R2-specific region
+    access_key="f1889d933799dc332549e6671a042e36",  # 32-char hex pattern
+    secret_key="your-secret"
+)
+# ✅ Automatically detects Cloudflare R2
+
+# Smart detection based on access key pattern
+client = create_client(
+    access_key="AKIAIOSFODNN7EXAMPLE",  # AWS pattern
+    secret_key="your-secret",
+    region="us-west-2"
+)
+# ✅ Automatically detects AWS S3
+
+# Smart detection for MinIO
+client = create_client(
+    access_key="minioadmin",  # Default MinIO credentials
+    secret_key="minioadmin",
+    endpoint="localhost:9000"
+)
+# ✅ Automatically detects MinIO
+```
+
+### Detection Rules & Priority
+
+The detection system uses a priority-based rule engine that evaluates multiple factors:
+
+1. **Endpoint Patterns** (Highest Priority - 5-10)
+   - `amazonaws.com` → AWS S3
+   - `r2.cloudflarestorage.com` → Cloudflare R2
+   - `digitaloceanspaces.com` → DigitalOcean Spaces
+   - `linodeobjects.com` → Linode Object Storage
+   - `wasabisys.com` → Wasabi
+   - `backblazeb2.com` → Backblaze B2
+   - `scw.cloud` → Scaleway
+   - `aliyuncs.com` → Alibaba Cloud OSS
+   - `googleapis.com` → Google Cloud Storage
+   - `oraclecloud.com` → Oracle Cloud Infrastructure
+   - `cloud-object-storage.appdomain.cloud` → IBM Cloud
+
+2. **Special Region Indicators** (Priority 15)
+   - `region="auto"` → Cloudflare R2
+
+3. **Access Key Patterns** (Priority 20-25)
+   - `AKIA[A-Z0-9]{16}` → AWS S3 (standard keys)
+   - `ASIA[A-Z0-9]{16}` → AWS S3 (temporary keys)
+   - `[0-9a-fA-F]{32}` → Cloudflare R2 (32-char hex)
+
+4. **Region Formats** (Priority 30-35)
+   - `[a-z]{2,3}-[a-z]+-\d+` → AWS S3 (e.g., us-west-2)
+   - `nyc1`, `nyc3`, `fra1`, etc. → DigitalOcean Spaces
+
+5. **Default Credentials** (Priority 40)
+   - `minioadmin`, `minio` → MinIO
+
+6. **Endpoint Characteristics** (Priority 50+)
+   - Localhost with port → MinIO
+   - Domain containing "min.io" → MinIO
+
+### Supported Providers
+
+All major S3-compatible providers are supported with automatic detection:
+
+| Provider | Detection Criteria | Example |
+|----------|-------------------|---------|
+| **AWS S3** | `amazonaws.com` endpoints, `AKIA`/`ASIA` keys, AWS regions | `us-west-2`, `AKIAIOSFODNN7EXAMPLE` |
+| **Cloudflare R2** | `r2.cloudflarestorage.com`, `region="auto"`, 32-char hex keys | `f1889d933799dc332549e6671a042e36` |
+| **MinIO** | Default credentials, localhost endpoints, `min.io` domains | `minioadmin`, `localhost:9000` |
+| **DigitalOcean Spaces** | `digitaloceanspaces.com`, DO region codes | `nyc3`, `fra1`, `ams3` |
+| **Linode Object Storage** | `linodeobjects.com` endpoints | `us-east-1.linodeobjects.com` |
+| **Wasabi** | `wasabisys.com` endpoints | `s3.us-east-1.wasabisys.com` |
+| **Backblaze B2** | `backblazeb2.com` endpoints | `s3.us-west-000.backblazeb2.com` |
+| **Scaleway** | `scw.cloud` endpoints | `s3.fr-par.scw.cloud` |
+| **Alibaba Cloud OSS** | `aliyuncs.com` endpoints | `oss-cn-hangzhou.aliyuncs.com` |
+| **Google Cloud Storage** | `googleapis.com` endpoints | `storage.googleapis.com` |
+| **Oracle Cloud** | `oraclecloud.com` endpoints | `namespace.compat.objectstorage.us-ashburn-1.oraclecloud.com` |
+| **IBM Cloud** | `cloud-object-storage.appdomain.cloud` | `s3.us-south.cloud-object-storage.appdomain.cloud` |
+
+### Override Detection
+
+You can always override automatic detection by explicitly specifying `service_type`:
+
+```python
+# Force MinIO even with AWS-like credentials
+client = create_client(
+    service_type="minio",  # Explicit override
+    access_key="AKIAIOSFODNN7EXAMPLE",  # Would normally detect AWS
+    secret_key="your-secret",
+    endpoint="localhost:9000"
+)
+```
+
+### Legacy Script Migration
+
+Existing scripts automatically benefit from smart detection without any changes:
+
+```python
+# Old script - still works perfectly
+client = create_client(
+    access_key="AKIAIOSFODNN7EXAMPLE",
+    secret_key="your-secret",
+    region="us-west-2"
+)
+# ✅ Automatically detects AWS S3 - no migration needed!
 ```
 
 ## 🔧 Configuration
