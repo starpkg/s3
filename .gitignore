@@ -23,3 +23,10 @@ go.work.sum
 
 # env file
 .env
+
+# Test temporary files
+temp_test_*
+test_temp_*
+*.tmp
+test_download_*
+test_upload_*
