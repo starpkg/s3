@@ -60,9 +60,9 @@ func (c *ClientConfig) Validate() error {
 		c.ServiceType = "auto"
 	}
 
-	if c.Region == "" {
-		c.Region = "us-east-1"
-	}
+	// if c.Region == "" {
+	// 	c.Region = "us-east-1"
+	// }
 
 	if c.Timeout <= 0 {
 		c.Timeout = 30

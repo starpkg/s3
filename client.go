@@ -143,7 +143,6 @@ func (c *Client) CreateBucket(ctx context.Context, bucket string, region ...stri
 
 	// Set region if provided
 	if len(region) > 0 && region[0] != "" {
-		// For regions other than us-east-1, we need to set the location constraint
 		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
 			LocationConstraint: types.BucketLocationConstraint(region[0]),
 		}

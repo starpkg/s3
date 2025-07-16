@@ -44,7 +44,7 @@ func NewModule() *Module {
 		genConfigOption(configKeyPartSize, "Default multipart upload part size in bytes", int64(5*1024*1024)),
 		genConfigOption(configKeyConcurrency, "Default number of concurrent operations", 3),
 		genConfigOption(configKeyEnableLogging, "Default enable debug logging", false),
-		genConfigOption(configKeyUserAgent, "Default user agent string", "starlark-s3/1.0"),
+		genConfigOption(configKeyUserAgent, "Default user agent string", "Starlark-S3/1.0"),
 	)
 }
 
