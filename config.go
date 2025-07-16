@@ -54,7 +54,7 @@ type ClientConfig struct {
 	UserAgent     string // Custom user agent
 }
 
-// Validate validates the client configuration
+// Validate validates the client configuration and sets defaults.
 func (c *ClientConfig) Validate() error {
 	if c.ServiceType == "" {
 		c.ServiceType = "auto"
@@ -81,7 +81,7 @@ func (c *ClientConfig) Validate() error {
 	}
 
 	if c.UserAgent == "" {
-		c.UserAgent = "starlark-s3/1.0"
+		c.UserAgent = "Starlark-S3/1.0"
 	}
 
 	// Auto-detect service type if needed

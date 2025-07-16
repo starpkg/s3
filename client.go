@@ -77,11 +77,6 @@ func NewClient(ctx context.Context, clientConfig *ClientConfig) (*Client, error)
 		return nil, fmt.Errorf("client config cannot be nil")
 	}
 
-	// Validate configuration
-	if err := clientConfig.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid client configuration: %w", err)
-	}
-
 	// Create AWS configuration
 	cfg, err := createAWSConfig(ctx, clientConfig)
 	if err != nil {
@@ -149,10 +144,8 @@ func (c *Client) CreateBucket(ctx context.Context, bucket string, region ...stri
 	// Set region if provided
 	if len(region) > 0 && region[0] != "" {
 		// For regions other than us-east-1, we need to set the location constraint
-		if region[0] != "us-east-1" {
-			input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
-				LocationConstraint: types.BucketLocationConstraint(region[0]),
-			}
+		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(region[0]),
 		}
 	}
 
@@ -245,9 +238,6 @@ func (c *Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo,
 	locationResult, err := c.client.GetBucketLocation(ctx, locationInput)
 	if err == nil {
 		info.Region = string(locationResult.LocationConstraint)
-		if info.Region == "" {
-			info.Region = "us-east-1" // Default region
-		}
 	}
 
 	// Get bucket versioning

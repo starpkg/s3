@@ -3,7 +3,6 @@ package s3
 
 import (
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -147,30 +146,6 @@ func DetectProviderFromConfig(config *ClientConfig) string {
 	}
 
 	return ProviderCustom
-}
-
-// parseURLWithConfig parses a URL using a specific provider configuration
-func parseURLWithConfig(s3URL string, config *ProviderConfig) (bucket, key string, err error) {
-	if !strings.HasPrefix(s3URL, "http://") && !strings.HasPrefix(s3URL, "https://") {
-		return "", "", fmt.Errorf("unsupported URL format: %s", s3URL)
-	}
-
-	u, err := url.Parse(s3URL)
-	if err != nil {
-		return "", "", fmt.Errorf("invalid URL: %w", err)
-	}
-
-	// Try each URL pattern for this provider
-	for _, pattern := range config.URLPatterns {
-		if pattern.Pattern.MatchString(s3URL) {
-			bucket, key, ok := pattern.ParseFunc(u.Host, u.Path)
-			if ok {
-				return bucket, key, nil
-			}
-		}
-	}
-
-	return "", "", fmt.Errorf("unable to parse URL with provider %s: %s", config.Name, s3URL)
 }
 
 // GenerateURLWithProvider generates a public URL using provider-specific logic
@@ -565,7 +540,7 @@ var providerConfigs = map[string]*ProviderConfig{
 	ProviderAlibaba: {
 		Name:                  ProviderAlibaba,
 		DisplayName:           "Alibaba Cloud OSS",
-		DefaultRegion:         "oss-cn-hangzhou",
+		DefaultRegion:         "cn-hongkong",
 		DefaultPort:           "443",
 		ForcePathStyle:        false,
 		URLStyle:              URLStyleBoth,

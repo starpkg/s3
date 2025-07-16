@@ -187,6 +187,11 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		UserAgent:      getConfigValue(m.ext.GetString(configKeyUserAgent), userAgent),
 	}
 
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid client configuration: %w", err)
+	}
+
 	// Apply smart detection if service type is "auto" or empty
 	if config.ServiceType == "auto" || config.ServiceType == "" {
 		config.ServiceType = config.detectServiceType()
@@ -248,6 +253,9 @@ type ClientWrapper struct {
 // Struct converts the S3Client to a Starlark struct
 func (s *ClientWrapper) Struct() *starlarkstruct.Struct {
 	return starlarkstruct.FromStringDict(starlark.String("S3Client"), starlark.StringDict{
+		// Client information
+		"get_client_info": starlark.NewBuiltin("s3.get_client_info", s.getClientInfo),
+
 		// Bucket operations
 		"create_bucket":   starlark.NewBuiltin("s3.create_bucket", s.createBucket),
 		"delete_bucket":   starlark.NewBuiltin("s3.delete_bucket", s.deleteBucket),
@@ -904,6 +912,39 @@ func (s *ClientWrapper) getPublicURL(thread *starlark.Thread, b *starlark.Builti
 	// Use the client's configuration to generate the public URL
 	url := GenerateURLWithProvider(bucket, key, config.Region, config.Endpoint, config.UseSSL, config.ServiceType)
 	return starlark.String(url), nil
+}
+
+// getClientInfo returns information about the S3 client
+func (s *ClientWrapper) getClientInfo(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs); err != nil {
+		return none, err
+	}
+
+	config := s.client.GetConfig()
+
+	// For security, only show if secrets are set, not their actual values
+	accessKeySet := config.AccessKey != ""
+	secretKeySet := config.SecretKey != ""
+	sessionTokenSet := config.SessionToken != ""
+
+	infoDict := starlark.StringDict{
+		"service_type":      starlark.String(config.ServiceType),
+		"access_key_set":    starlark.Bool(accessKeySet),
+		"secret_key_set":    starlark.Bool(secretKeySet),
+		"session_token_set": starlark.Bool(sessionTokenSet),
+		"region":            starlark.String(config.Region),
+		"endpoint":          starlark.String(config.Endpoint),
+		"force_path_style":  starlark.Bool(config.ForcePathStyle),
+		"use_ssl":           starlark.Bool(config.UseSSL),
+		"timeout":           starlark.MakeInt(config.Timeout),
+		"max_retries":       starlark.MakeInt(config.MaxRetries),
+		"part_size":         starlark.MakeInt64(config.PartSize),
+		"concurrency":       starlark.MakeInt(config.Concurrency),
+		"enable_logging":    starlark.Bool(config.EnableLogging),
+		"user_agent":        starlark.String(config.UserAgent),
+	}
+
+	return starlarkstruct.FromStringDict(starlark.String("ClientInfo"), infoDict), nil
 }
 
 // Utility functions for Starlark
