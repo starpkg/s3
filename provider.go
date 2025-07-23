@@ -154,11 +154,18 @@ func GenerateURLWithProvider(bucket, key, region, endpoint string, useSSL bool, 
 
 	// If a custom endpoint is provided, use it
 	if endpoint != "" {
-		scheme := "https"
-		if !useSSL {
-			scheme = "http"
+		// Check if endpoint already includes scheme
+		if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+			// Endpoint already has scheme, use it directly
+			return fmt.Sprintf("%s/%s/%s", endpoint, bucket, key)
+		} else {
+			// Endpoint doesn't have scheme, add it
+			scheme := "https"
+			if !useSSL {
+				scheme = "http"
+			}
+			return fmt.Sprintf("%s://%s/%s/%s", scheme, endpoint, bucket, key)
 		}
-		return fmt.Sprintf("%s://%s/%s/%s", scheme, endpoint, bucket, key)
 	}
 
 	// Use provider-specific URL generation
