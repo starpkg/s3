@@ -540,7 +540,7 @@ var providerConfigs = map[string]*ProviderConfig{
 	ProviderAlibaba: {
 		Name:                  ProviderAlibaba,
 		DisplayName:           "Alibaba Cloud OSS",
-		DefaultRegion:         "cn-hongkong",
+		DefaultRegion:         "cn-hangzhou",
 		DefaultPort:           "443",
 		ForcePathStyle:        false,
 		URLStyle:              URLStyleBoth,

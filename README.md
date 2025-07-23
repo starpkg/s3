@@ -23,6 +23,8 @@ The S3 module provides a comprehensive, easy-to-use interface for interacting wi
 - **🔍 Intelligent Configuration**: Environment variable integration and smart defaults
 - **🎯 Starlark Native**: Designed specifically for Starlark with proper error handling and type safety
 
+
+
 ## 🚀 Quick Start
 
 ### Basic Usage
@@ -343,6 +345,73 @@ The module supports these S3-compatible services with automatic endpoint detecti
 | Oracle Cloud | `ProviderOracle` | `"oracle"` | `us-ashburn-1` | Oracle Cloud Infrastructure |
 | IBM Cloud | `ProviderIBM` | `"ibm"` | `us-south` | IBM Cloud Object Storage |
 | Custom Provider | `ProviderCustom` | `"custom"` | `us-east-1` | Generic S3-compatible service |
+
+### 📝 Provider-Specific Notes
+
+#### Alibaba Cloud OSS Considerations
+
+When working with Alibaba Cloud OSS, please note the following based on the [official CopyObject documentation](https://help.aliyun.com/zh/oss/developer-reference/copyobject):
+
+- **Copy Operations**: Complex metadata modifications during copy operations may require specific header signing that differs from standard AWS S3. Our tests use simplified copy operations for maximum compatibility.
+- **Permissions**: CopyObject requires both `oss:GetObject` (source) and `oss:PutObject` (destination) permissions
+- **Size Limitations**: 
+  - Same bucket copies: Objects can be larger than 5GB
+  - Cross-bucket copies: Objects must be ≤5GB  
+  - Storage type changes: Objects must be ≤1GB
+- **Chinese Character Support**: Full UTF-8 support for object keys and metadata values
+- **Regional Endpoints**: Use region-specific endpoints like `oss-cn-hangzhou.aliyuncs.com`
+
+#### Cloudflare R2 Considerations
+
+- **No Object Tagging**: R2 doesn't support S3 object tagging operations
+- **Region Setting**: Use `region="auto"` for R2 endpoints
+- **Account ID**: Include your Cloudflare account ID in the endpoint URL
+
+#### AWS S3 Considerations  
+
+- **Complete Compatibility**: Full feature support including advanced metadata, tagging, and versioning
+- **Regional Optimization**: Choose regions close to your application for better performance
+- **Cost Optimization**: Consider storage classes and lifecycle policies for cost management
+
+## ⚠️ Provider Feature Compatibility
+
+While the S3 module provides a universal interface, some advanced features may not be supported by all providers:
+
+| Feature | AWS S3 | Alibaba OSS | Cloudflare R2 | DigitalOcean | MinIO | Notes |
+|---------|---------|-------------|---------------|--------------|-------|-------|
+| **Object Tagging** | ✅ | ✅ | ❌ | ✅ | ✅ | R2 doesn't support S3 object tagging |
+| **Bucket Versioning** | ✅ | ✅ | ❌ | ✅ | ✅ | R2 has limited versioning support |
+| **Bucket Policies** | ✅ | ✅ | ✅ | ✅ | ✅ | All providers support basic policies |
+| **Object Lock** | ✅ | ✅ | ❌ | ❌ | ✅ | Enterprise compliance feature |
+| **Lifecycle Management** | ✅ | ✅ | ❌ | ✅ | ✅ | Automatic object expiration |
+| **Multipart Upload** | ✅ | ✅ | ✅ | ✅ | ✅ | Large file upload optimization |
+| **Presigned URLs** | ✅ | ✅ | ✅ | ✅ | ✅ | Temporary access URLs |
+| **Server-Side Encryption** | ✅ | ✅ | ✅ | ✅ | ✅ | Data encryption at rest |
+| **Cross-Region Replication** | ✅ | ✅ | ❌ | ❌ | ❌ | Geographic data distribution |
+| **Event Notifications** | ✅ | ✅ | ❌ | ❌ | ✅ | Webhook/queue integration |
+| **Access Logging** | ✅ | ✅ | ❌ | ✅ | ❌ | Request access logs |
+| **Transfer Acceleration** | ✅ | ❌ | ✅ | ❌ | ❌ | Global edge acceleration |
+
+### 🔧 Feature Usage Guidelines
+
+When using advanced features, consider provider compatibility:
+
+```python
+# Safe approach - Check provider before using advanced features
+if client.get_provider_type() == "aws":
+    # Use advanced AWS features
+    client.put_object(bucket, key, content, tags={"env": "prod"})
+elif client.get_provider_type() == "cloudflare":
+    # Use basic features for R2
+    client.put_object(bucket, key, content)  # No tags
+```
+
+### 📋 Graceful Degradation
+
+The module handles unsupported features gracefully:
+- **Object Tagging**: Silently ignored on incompatible providers
+- **Advanced Metadata**: Basic metadata preserved, advanced headers may be dropped
+- **Error Handling**: Clear error messages for unsupported operations
 
 ### Provider Integration Process
 
@@ -999,20 +1068,23 @@ else:
 
 ## 🧪 Testing
 
-Run the test suite:
+### Run Test Suite
+
+Execute the comprehensive test suite:
 
 ```bash
 go test -v
 ```
 
-The test suite includes:
+**📋 For extensive integration testing with real cloud providers, see [test/s3/README.md](test/s3/README.md)**
 
-- Client creation and configuration tests
-- Utility function tests
-- API method availability tests
-- URL parsing tests for multiple providers
-- Bucket and object operation interface tests
-- Service type detection tests
+The Go test suite includes:
+- Client creation and configuration validation
+- Utility function correctness  
+- API method availability verification
+- URL parsing accuracy for all supported providers
+- Provider detection algorithm testing
+- Service type detection and smart defaults
 
 ## 📄 License
 
