@@ -22,6 +22,12 @@ var (
 	none = starlark.None
 )
 
+// Ensure ClientWrapper implements the required Starlark interfaces
+var (
+	_ starlark.Value    = (*ClientWrapper)(nil)
+	_ starlark.HasAttrs = (*ClientWrapper)(nil)
+)
+
 // Module wraps the ConfigurableModule with specific functionality for S3 operations
 type Module struct {
 	cfgMod *base.ConfigurableModule
@@ -204,9 +210,9 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		return none, fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	// Create the wrapper and return it as a Starlark struct
-	wrapper := &ClientWrapper{client: client}
-	return wrapper.Struct(), nil
+	// Create the wrapper and return it directly
+	wrapper := NewClientWrapper(client)
+	return wrapper, nil
 }
 
 // Helper functions for config value resolution
@@ -247,36 +253,87 @@ func getInt64ConfigValue(moduleDefault, override int64) int64 {
 
 // ClientWrapper wraps the S3Client for Starlark
 type ClientWrapper struct {
-	client *Client
+	client    *Client
+	methodMap map[string]func() starlark.Value
+	allNames  []string
 }
 
-// Struct converts the S3Client to a Starlark struct
-func (s *ClientWrapper) Struct() *starlarkstruct.Struct {
-	return starlarkstruct.FromStringDict(starlark.String("S3Client"), starlark.StringDict{
+// NewClientWrapper creates a new ClientWrapper with initialized method maps
+func NewClientWrapper(client *Client) *ClientWrapper {
+	cw := &ClientWrapper{
+		client: client,
+	}
+
+	// Initialize method map
+	cw.methodMap = map[string]func() starlark.Value{
 		// Client information
-		"get_client_info": starlark.NewBuiltin("s3.get_client_info", s.getClientInfo),
+		"get_client_info": func() starlark.Value { return starlark.NewBuiltin("s3.get_client_info", cw.getClientInfo) },
 
 		// Bucket operations
-		"create_bucket":   starlark.NewBuiltin("s3.create_bucket", s.createBucket),
-		"delete_bucket":   starlark.NewBuiltin("s3.delete_bucket", s.deleteBucket),
-		"list_buckets":    starlark.NewBuiltin("s3.list_buckets", s.listBuckets),
-		"bucket_exists":   starlark.NewBuiltin("s3.bucket_exists", s.bucketExists),
-		"get_bucket_info": starlark.NewBuiltin("s3.get_bucket_info", s.getBucketInfo),
+		"create_bucket":   func() starlark.Value { return starlark.NewBuiltin("s3.create_bucket", cw.createBucket) },
+		"delete_bucket":   func() starlark.Value { return starlark.NewBuiltin("s3.delete_bucket", cw.deleteBucket) },
+		"list_buckets":    func() starlark.Value { return starlark.NewBuiltin("s3.list_buckets", cw.listBuckets) },
+		"bucket_exists":   func() starlark.Value { return starlark.NewBuiltin("s3.bucket_exists", cw.bucketExists) },
+		"get_bucket_info": func() starlark.Value { return starlark.NewBuiltin("s3.get_bucket_info", cw.getBucketInfo) },
 
 		// Object operations
-		"put_object":      starlark.NewBuiltin("s3.put_object", s.putObject),
-		"put_object_file": starlark.NewBuiltin("s3.put_object_file", s.putObjectFile),
-		"get_object":      starlark.NewBuiltin("s3.get_object", s.getObject),
-		"get_object_file": starlark.NewBuiltin("s3.get_object_file", s.getObjectFile),
-		"delete_object":   starlark.NewBuiltin("s3.delete_object", s.deleteObject),
-		"list_objects":    starlark.NewBuiltin("s3.list_objects", s.listObjects),
-		"object_exists":   starlark.NewBuiltin("s3.object_exists", s.objectExists),
-		"get_object_info": starlark.NewBuiltin("s3.get_object_info", s.getObjectInfo),
-		"set_object_info": starlark.NewBuiltin("s3.set_object_info", s.setObjectInfo),
-		"copy_object":     starlark.NewBuiltin("s3.copy_object", s.copyObject),
-		"presign_url":     starlark.NewBuiltin("s3.presign_url", s.presignURL),
-		"get_public_url":  starlark.NewBuiltin("s3.get_public_url", s.getPublicURL),
-	})
+		"put_object":      func() starlark.Value { return starlark.NewBuiltin("s3.put_object", cw.putObject) },
+		"put_object_file": func() starlark.Value { return starlark.NewBuiltin("s3.put_object_file", cw.putObjectFile) },
+		"get_object":      func() starlark.Value { return starlark.NewBuiltin("s3.get_object", cw.getObject) },
+		"get_object_file": func() starlark.Value { return starlark.NewBuiltin("s3.get_object_file", cw.getObjectFile) },
+		"delete_object":   func() starlark.Value { return starlark.NewBuiltin("s3.delete_object", cw.deleteObject) },
+		"list_objects":    func() starlark.Value { return starlark.NewBuiltin("s3.list_objects", cw.listObjects) },
+		"object_exists":   func() starlark.Value { return starlark.NewBuiltin("s3.object_exists", cw.objectExists) },
+		"get_object_info": func() starlark.Value { return starlark.NewBuiltin("s3.get_object_info", cw.getObjectInfo) },
+		"set_object_info": func() starlark.Value { return starlark.NewBuiltin("s3.set_object_info", cw.setObjectInfo) },
+		"copy_object":     func() starlark.Value { return starlark.NewBuiltin("s3.copy_object", cw.copyObject) },
+		"presign_url":     func() starlark.Value { return starlark.NewBuiltin("s3.presign_url", cw.presignURL) },
+		"get_public_url":  func() starlark.Value { return starlark.NewBuiltin("s3.get_public_url", cw.getPublicURL) },
+	}
+
+	// Collect all attribute names
+	cw.allNames = make([]string, 0, len(cw.methodMap))
+	for name := range cw.methodMap {
+		cw.allNames = append(cw.allNames, name)
+	}
+
+	return cw
+}
+
+// Implement starlark.Value interface
+func (cw *ClientWrapper) String() string {
+	config := cw.client.GetConfig()
+	return fmt.Sprintf("<s3.Client service_type=%s region=%s>", config.ServiceType, config.Region)
+}
+
+func (cw *ClientWrapper) Type() string {
+	return "s3.Client"
+}
+
+func (cw *ClientWrapper) Freeze() {
+	// Client is immutable after creation
+}
+
+func (cw *ClientWrapper) Truth() starlark.Bool {
+	return starlark.True
+}
+
+func (cw *ClientWrapper) Hash() (uint32, error) {
+	return 0, fmt.Errorf("unhashable type: %s", cw.Type())
+}
+
+// Implement starlark.HasAttrs interface
+func (cw *ClientWrapper) Attr(name string) (starlark.Value, error) {
+	// Check for methods using map lookup
+	if methodFunc, exists := cw.methodMap[name]; exists {
+		return methodFunc(), nil
+	}
+
+	return nil, starlark.NoSuchAttrError(fmt.Sprintf("%s has no .%s attribute", cw.Type(), name))
+}
+
+func (cw *ClientWrapper) AttrNames() []string {
+	return cw.allNames
 }
 
 // createBucket creates a new S3 bucket
