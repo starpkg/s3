@@ -78,20 +78,6 @@ type ServiceConfig struct {
 	DefaultPort     string
 }
 
-// getServiceConfig returns configuration for known S3-compatible services
-func getServiceConfig(serviceType string) *ServiceConfig {
-	// Convert new ProviderConfig to old ServiceConfig format for backward compatibility
-	providerConfig := GetProviderConfig(serviceType)
-
-	return &ServiceConfig{
-		Name:            providerConfig.DisplayName,
-		DefaultRegion:   providerConfig.DefaultRegion,
-		EndpointPattern: providerConfig.EndpointPattern,
-		ForcePathStyle:  providerConfig.ForcePathStyle,
-		DefaultPort:     providerConfig.DefaultPort,
-	}
-}
-
 // convertStarlarkDict converts a Starlark dictionary to a Go map[string]string
 func convertStarlarkDict(dict *starlark.Dict) (map[string]string, error) {
 	if dict == nil || dict.Len() == 0 {

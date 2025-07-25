@@ -612,14 +612,6 @@ func (c *Client) PresignURL(ctx context.Context, bucket, key string, expiresInSe
 	return req.URL, nil
 }
 
-// GetPublicURL generates a public HTTP URL for an object using client configuration
-func (c *Client) GetPublicURL(bucket, key string) string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return GenerateURLWithProvider(bucket, key, c.config.Region, c.config.Endpoint, c.config.UseSSL, c.config.ServiceType)
-}
-
 // deleteAllObjects deletes all objects in a bucket (helper for force delete)
 func (c *Client) deleteAllObjects(ctx context.Context, bucket string) error {
 	// List all objects
