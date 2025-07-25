@@ -20,6 +20,48 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// Helper function to get owner display name from AWS Owner type
+func getOwnerDisplayName(owner *types.Owner) string {
+	if owner == nil {
+		return ""
+	}
+	if owner.DisplayName != nil {
+		return aws.ToString(owner.DisplayName)
+	}
+	if owner.ID != nil {
+		return aws.ToString(owner.ID)
+	}
+	return ""
+}
+
+// convertAWSBucketToBucketInfo converts an AWS Bucket to our BucketInfo struct
+func convertAWSBucketToBucketInfo(bucket types.Bucket) BucketInfo {
+	return BucketInfo{
+		Name:         aws.ToString(bucket.Name),
+		CreationDate: aws.ToTime(bucket.CreationDate),
+	}
+}
+
+// convertAWSObjectToObjectInfo converts an AWS Object to our ObjectInfo struct
+func convertAWSObjectToObjectInfo(obj types.Object) ObjectInfo {
+	objInfo := ObjectInfo{
+		Key:          aws.ToString(obj.Key),
+		Size:         aws.ToInt64(obj.Size),
+		LastModified: aws.ToTime(obj.LastModified),
+		ETag:         aws.ToString(obj.ETag),
+		StorageClass: string(obj.StorageClass),
+		Owner:        getOwnerDisplayName(obj.Owner),
+	}
+
+	// Handle checksum algorithms if present
+	if len(obj.ChecksumAlgorithm) > 0 {
+		// Store the first checksum algorithm as a string representation
+		objInfo.VersionId = string(obj.ChecksumAlgorithm[0])
+	}
+
+	return objInfo
+}
+
 // Utility helper functions for Starlark conversions
 
 // timeToStarlark converts time.Time to starlark.Value, returning None for zero time
@@ -188,10 +230,7 @@ func (c *Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
 
 	buckets := make([]BucketInfo, len(result.Buckets))
 	for i, bucket := range result.Buckets {
-		buckets[i] = BucketInfo{
-			Name:         aws.ToString(bucket.Name),
-			CreationDate: aws.ToTime(bucket.CreationDate),
-		}
+		buckets[i] = convertAWSBucketToBucketInfo(bucket)
 	}
 
 	return buckets, nil
@@ -236,7 +275,9 @@ func (c *Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo,
 	}
 	locationResult, err := c.client.GetBucketLocation(ctx, locationInput)
 	if err == nil {
-		info.Region = string(locationResult.LocationConstraint)
+		region := string(locationResult.LocationConstraint)
+		info.Region = region
+		info.Location = region
 	}
 
 	// Get bucket versioning
@@ -261,9 +302,25 @@ func (c *Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo,
 	encryptionInput := &s3.GetBucketEncryptionInput{
 		Bucket: aws.String(bucket),
 	}
-	_, err = c.client.GetBucketEncryption(ctx, encryptionInput)
-	if err == nil {
+	encryptionResult, err := c.client.GetBucketEncryption(ctx, encryptionInput)
+	if err == nil && encryptionResult.ServerSideEncryptionConfiguration != nil {
 		info.EncryptionEnabled = true
+		// Get encryption type from the first rule
+		if len(encryptionResult.ServerSideEncryptionConfiguration.Rules) > 0 {
+			rule := encryptionResult.ServerSideEncryptionConfiguration.Rules[0]
+			if rule.ApplyServerSideEncryptionByDefault != nil {
+				info.EncryptionType = string(rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm)
+			}
+		}
+	}
+
+	// Try to get bucket CORS configuration
+	corsInput := &s3.GetBucketCorsInput{
+		Bucket: aws.String(bucket),
+	}
+	_, err = c.client.GetBucketCors(ctx, corsInput)
+	if err == nil {
+		info.HasCors = true
 	}
 
 	// Try to get public access block
@@ -428,12 +485,7 @@ func (c *Client) ListObjects(ctx context.Context, bucket string, opts *ListObjec
 	// Convert to our result format
 	objects := make([]ObjectInfo, len(result.Contents))
 	for i, obj := range result.Contents {
-		objects[i] = ObjectInfo{
-			Key:          aws.ToString(obj.Key),
-			Size:         aws.ToInt64(obj.Size),
-			LastModified: aws.ToTime(obj.LastModified),
-			ETag:         aws.ToString(obj.ETag),
-		}
+		objects[i] = convertAWSObjectToObjectInfo(obj)
 	}
 
 	commonPrefixes := make([]string, len(result.CommonPrefixes))
@@ -483,14 +535,27 @@ func (c *Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Object
 		return nil, fmt.Errorf("failed to get object info for %s/%s: %w", bucket, key, err)
 	}
 
-	return &ObjectInfo{
-		Key:          key,
-		Size:         aws.ToInt64(result.ContentLength),
-		LastModified: aws.ToTime(result.LastModified),
-		ETag:         aws.ToString(result.ETag),
-		ContentType:  aws.ToString(result.ContentType),
-		Metadata:     result.Metadata,
-	}, nil
+	objInfo := &ObjectInfo{
+		Key:                key,
+		Size:               aws.ToInt64(result.ContentLength),
+		LastModified:       aws.ToTime(result.LastModified),
+		ETag:               aws.ToString(result.ETag),
+		ContentType:        aws.ToString(result.ContentType),
+		ContentEncoding:    aws.ToString(result.ContentEncoding),
+		ContentDisposition: aws.ToString(result.ContentDisposition),
+		ContentLanguage:    aws.ToString(result.ContentLanguage),
+		CacheControl:       aws.ToString(result.CacheControl),
+		StorageClass:       string(result.StorageClass),
+		VersionId:          aws.ToString(result.VersionId),
+		Metadata:           result.Metadata,
+	}
+
+	// Handle expires field if present
+	if result.Expires != nil {
+		objInfo.Expires = result.Expires
+	}
+
+	return objInfo, nil
 }
 
 // SetObjectInfo sets metadata and other properties for an existing object
@@ -655,32 +720,46 @@ func (c *Client) deleteAllObjects(ctx context.Context, bucket string) error {
 	return nil
 }
 
-// BucketInfo contains information about an S3 bucket
+// BucketInfo contains comprehensive information about an S3 bucket
 type BucketInfo struct {
-	Name                string    `json:"name"`
-	CreationDate        time.Time `json:"creation_date,omitempty"`
-	Region              string    `json:"region,omitempty"`
-	VersioningStatus    string    `json:"versioning_status,omitempty"`
-	PublicAccessBlocked bool      `json:"public_access_blocked,omitempty"`
-	HasPolicy           bool      `json:"has_policy,omitempty"`
-	EncryptionEnabled   bool      `json:"encryption_enabled,omitempty"`
-	ObjectCount         int64     `json:"object_count,omitempty"`
-	TotalSize           int64     `json:"total_size,omitempty"`
+	Name                string            `json:"name"`
+	CreationDate        time.Time         `json:"creation_date,omitempty"`
+	Region              string            `json:"region,omitempty"`
+	Location            string            `json:"location,omitempty"`
+	VersioningStatus    string            `json:"versioning_status,omitempty"`
+	PublicAccessBlocked bool              `json:"public_access_blocked,omitempty"`
+	HasPolicy           bool              `json:"has_policy,omitempty"`
+	HasCors             bool              `json:"has_cors,omitempty"`
+	EncryptionEnabled   bool              `json:"encryption_enabled,omitempty"`
+	EncryptionType      string            `json:"encryption_type,omitempty"`
+	ObjectCount         int64             `json:"object_count,omitempty"`
+	TotalSize           int64             `json:"total_size,omitempty"`
+	StorageClass        string            `json:"storage_class,omitempty"`
+	Tags                map[string]string `json:"tags,omitempty"`
+	Owner               string            `json:"owner,omitempty"`
+	BucketType          string            `json:"bucket_type,omitempty"`
 }
 
 // MarshalStarlark implements the Marshaler interface for BucketInfo
 func (b *BucketInfo) MarshalStarlark() (starlark.Value, error) {
-	dict := starlark.NewDict(9)
+	dict := starlark.NewDict(16)
 
 	dict.SetKey(starlark.String("name"), starlark.String(b.Name))
 	dict.SetKey(starlark.String("creation_date"), timeToStarlark(b.CreationDate))
 	dict.SetKey(starlark.String("region"), starlark.String(b.Region))
+	dict.SetKey(starlark.String("location"), starlark.String(b.Location))
 	dict.SetKey(starlark.String("versioning_status"), starlark.String(b.VersioningStatus))
 	dict.SetKey(starlark.String("public_access_blocked"), starlark.Bool(b.PublicAccessBlocked))
 	dict.SetKey(starlark.String("has_policy"), starlark.Bool(b.HasPolicy))
+	dict.SetKey(starlark.String("has_cors"), starlark.Bool(b.HasCors))
 	dict.SetKey(starlark.String("encryption_enabled"), starlark.Bool(b.EncryptionEnabled))
+	dict.SetKey(starlark.String("encryption_type"), starlark.String(b.EncryptionType))
 	dict.SetKey(starlark.String("object_count"), starlark.MakeInt64(b.ObjectCount))
 	dict.SetKey(starlark.String("total_size"), starlark.MakeInt64(b.TotalSize))
+	dict.SetKey(starlark.String("storage_class"), starlark.String(b.StorageClass))
+	dict.SetKey(starlark.String("tags"), stringMapToStarlark(b.Tags))
+	dict.SetKey(starlark.String("owner"), starlark.String(b.Owner))
+	dict.SetKey(starlark.String("bucket_type"), starlark.String(b.BucketType))
 
 	return dict, nil
 }
@@ -688,26 +767,53 @@ func (b *BucketInfo) MarshalStarlark() (starlark.Value, error) {
 // Ensure BucketInfo implements dataconv.Marshaler
 var _ dataconv.Marshaler = (*BucketInfo)(nil)
 
-// ObjectInfo contains information about an S3 object
+// ObjectInfo contains comprehensive information about an S3 object
 type ObjectInfo struct {
-	Key          string            `json:"key"`
-	Size         int64             `json:"size"`
-	LastModified time.Time         `json:"last_modified"`
-	ETag         string            `json:"etag"`
-	ContentType  string            `json:"content_type,omitempty"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
+	Key                string            `json:"key"`
+	Size               int64             `json:"size"`
+	LastModified       time.Time         `json:"last_modified"`
+	ETag               string            `json:"etag"`
+	ContentType        string            `json:"content_type,omitempty"`
+	ContentEncoding    string            `json:"content_encoding,omitempty"`
+	ContentDisposition string            `json:"content_disposition,omitempty"`
+	ContentLanguage    string            `json:"content_language,omitempty"`
+	CacheControl       string            `json:"cache_control,omitempty"`
+	Expires            *time.Time        `json:"expires,omitempty"`
+	StorageClass       string            `json:"storage_class,omitempty"`
+	VersionId          string            `json:"version_id,omitempty"`
+	IsLatest           bool              `json:"is_latest,omitempty"`
+	Owner              string            `json:"owner,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
+	Tags               map[string]string `json:"tags,omitempty"`
 }
 
 // MarshalStarlark implements the Marshaler interface for ObjectInfo
 func (o *ObjectInfo) MarshalStarlark() (starlark.Value, error) {
-	dict := starlark.NewDict(6)
+	dict := starlark.NewDict(16)
 
 	dict.SetKey(starlark.String("key"), starlark.String(o.Key))
 	dict.SetKey(starlark.String("size"), starlark.MakeInt64(o.Size))
 	dict.SetKey(starlark.String("last_modified"), timeToStarlark(o.LastModified))
 	dict.SetKey(starlark.String("etag"), starlark.String(o.ETag))
 	dict.SetKey(starlark.String("content_type"), starlark.String(o.ContentType))
+	dict.SetKey(starlark.String("content_encoding"), starlark.String(o.ContentEncoding))
+	dict.SetKey(starlark.String("content_disposition"), starlark.String(o.ContentDisposition))
+	dict.SetKey(starlark.String("content_language"), starlark.String(o.ContentLanguage))
+	dict.SetKey(starlark.String("cache_control"), starlark.String(o.CacheControl))
+
+	// Handle nullable expires field
+	if o.Expires != nil {
+		dict.SetKey(starlark.String("expires"), timeToStarlark(*o.Expires))
+	} else {
+		dict.SetKey(starlark.String("expires"), starlark.None)
+	}
+
+	dict.SetKey(starlark.String("storage_class"), starlark.String(o.StorageClass))
+	dict.SetKey(starlark.String("version_id"), starlark.String(o.VersionId))
+	dict.SetKey(starlark.String("is_latest"), starlark.Bool(o.IsLatest))
+	dict.SetKey(starlark.String("owner"), starlark.String(o.Owner))
 	dict.SetKey(starlark.String("metadata"), stringMapToStarlark(o.Metadata))
+	dict.SetKey(starlark.String("tags"), stringMapToStarlark(o.Tags))
 
 	return dict, nil
 }
@@ -727,9 +833,8 @@ type ListObjectsResult struct {
 }
 
 // MarshalStarlark implements the Marshaler interface for ListObjectsResult
+// Returns a list of objects directly instead of a dict with "contents" key
 func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
-	dict := starlark.NewDict(7)
-
 	// Convert Contents slice to Starlark list
 	contentsList := starlark.NewList(make([]starlark.Value, len(l.Contents)))
 	for i, obj := range l.Contents {
@@ -739,18 +844,9 @@ func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
 		}
 		contentsList.SetIndex(i, objValue)
 	}
-	dict.SetKey(starlark.String("contents"), contentsList)
 
-	// Convert CommonPrefixes slice to Starlark list using utility function
-	dict.SetKey(starlark.String("common_prefixes"), stringSliceToStarlark(l.CommonPrefixes))
-
-	dict.SetKey(starlark.String("is_truncated"), starlark.Bool(l.IsTruncated))
-	dict.SetKey(starlark.String("next_marker"), starlark.String(l.NextMarker))
-	dict.SetKey(starlark.String("max_keys"), starlark.MakeInt(l.MaxKeys))
-	dict.SetKey(starlark.String("prefix"), starlark.String(l.Prefix))
-	dict.SetKey(starlark.String("delimiter"), starlark.String(l.Delimiter))
-
-	return dict, nil
+	// Return the list directly instead of wrapping in a dict
+	return contentsList, nil
 }
 
 // Ensure ListObjectsResult implements dataconv.Marshaler

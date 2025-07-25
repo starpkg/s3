@@ -50,9 +50,9 @@ client.put_object("my-bucket", "hello.txt", "Hello, World!")
 content = client.get_object("my-bucket", "hello.txt")
 print(content)  # "Hello, World!"
 
-# List objects
+# List objects (returns a list directly)
 objects = client.list_objects("my-bucket")
-for obj in objects["contents"]:
+for obj in objects:
     print(obj["key"], obj["size"])
 
 # Generate a temporary download link
@@ -550,7 +550,23 @@ Lists all buckets in the account.
 
 **Returns:**
 
-- List of bucket information dictionaries
+- List of bucket information dictionaries, each containing:
+  - `name` (string): Bucket name
+  - `creation_date` (time.Time): Creation timestamp
+  - `region` (string): Bucket region
+  - `location` (string): Bucket location
+  - `versioning_status` (string): Versioning configuration
+  - `public_access_blocked` (bool): Public access block status
+  - `has_policy` (bool): Whether bucket has a policy
+  - `has_cors` (bool): Whether bucket has CORS configuration
+  - `encryption_enabled` (bool): Whether encryption is enabled
+  - `encryption_type` (string): Type of encryption used
+  - `object_count` (int): Number of objects in bucket
+  - `total_size` (int): Total size of all objects in bytes
+  - `storage_class` (string): Default storage class
+  - `tags` (dict): Bucket tags
+  - `owner` (string): Bucket owner
+  - `bucket_type` (string): Type of bucket
 
 #### `client.bucket_exists(bucket)`
 
@@ -574,16 +590,23 @@ Gets comprehensive information about a bucket.
 
 **Returns:**
 
-- Dictionary containing detailed bucket information:
+- Dictionary containing comprehensive bucket information:
   - `name` (string): Bucket name
+  - `creation_date` (time.Time): Creation timestamp
   - `region` (string): Bucket region
-  - `creation_date` (time.Time): Creation timestamp as a time object
+  - `location` (string): Bucket location
   - `versioning_status` (string): Versioning configuration
   - `public_access_blocked` (bool): Public access block status
   - `has_policy` (bool): Whether bucket has a policy
+  - `has_cors` (bool): Whether bucket has CORS configuration
   - `encryption_enabled` (bool): Whether encryption is enabled
+  - `encryption_type` (string): Type of encryption used
   - `object_count` (int): Number of objects in bucket
   - `total_size` (int): Total size of all objects in bytes
+  - `storage_class` (string): Default storage class
+  - `tags` (dict): Bucket tags
+  - `owner` (string): Bucket owner
+  - `bucket_type` (string): Type of bucket
 
 ### Object Operations
 
@@ -662,7 +685,23 @@ Lists objects in a bucket.
 
 **Returns:**
 
-- Dictionary containing object list and metadata
+- List of object info dictionaries, each containing:
+  - `key` (string): Object key
+  - `size` (int): Object size in bytes
+  - `last_modified` (time.Time): Last modification timestamp
+  - `etag` (string): Entity tag (ETag) of the object
+  - `content_type` (string): MIME type of the object
+  - `content_encoding` (string): Content encoding
+  - `content_disposition` (string): Content disposition
+  - `content_language` (string): Content language
+  - `cache_control` (string): Cache control header
+  - `expires` (time.Time): Expiration date
+  - `storage_class` (string): Storage class
+  - `version_id` (string): Version ID
+  - `is_latest` (bool): Whether this is the latest version
+  - `owner` (string): Object owner
+  - `metadata` (dict): User-defined metadata key-value pairs
+  - `tags` (dict): Object tags
 
 #### `client.object_exists(bucket, key)`
 
@@ -688,13 +727,23 @@ Gets metadata about an object.
 
 **Returns:**
 
-- Dictionary containing object metadata:
+- Dictionary containing comprehensive object metadata:
   - `key` (string): Object key
   - `size` (int): Object size in bytes
-  - `last_modified` (time.Time): Last modification timestamp as a time object
+  - `last_modified` (time.Time): Last modification timestamp
   - `etag` (string): Entity tag (ETag) of the object
   - `content_type` (string): MIME type of the object
+  - `content_encoding` (string): Content encoding
+  - `content_disposition` (string): Content disposition
+  - `content_language` (string): Content language
+  - `cache_control` (string): Cache control header
+  - `expires` (time.Time): Expiration date
+  - `storage_class` (string): Storage class
+  - `version_id` (string): Version ID
+  - `is_latest` (bool): Whether this is the latest version
+  - `owner` (string): Object owner
   - `metadata` (dict): User-defined metadata key-value pairs
+  - `tags` (dict): Object tags
 
 #### `client.set_object_info(bucket, key, **kwargs)`
 
