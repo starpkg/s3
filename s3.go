@@ -450,15 +450,17 @@ func (s *ClientWrapper) getBucketInfo(thread *starlark.Thread, b *starlark.Built
 // putObject uploads an object to S3
 func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
-		bucket          = ""
-		key             = ""
-		content         = ""
-		contentType     = ""
-		metadata        = starlark.NewDict(0)
-		tags            = starlark.NewDict(0)
-		contentEncoding = ""
-		cacheControl    = ""
-		expires         = ""
+		bucket             = ""
+		key                = ""
+		content            = ""
+		contentType        = ""
+		metadata           = starlark.NewDict(0)
+		tags               = starlark.NewDict(0)
+		cacheControl       = ""
+		contentDisposition = ""
+		contentEncoding    = ""
+		contentLanguage    = ""
+		expires            = ""
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
@@ -468,8 +470,10 @@ func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, 
 		"content_type?", &contentType,
 		"metadata?", &metadata,
 		"tags?", &tags,
-		"content_encoding?", &contentEncoding,
 		"cache_control?", &cacheControl,
+		"content_disposition?", &contentDisposition,
+		"content_encoding?", &contentEncoding,
+		"content_language?", &contentLanguage,
 		"expires?", &expires,
 	); err != nil {
 		return none, err
@@ -489,6 +493,19 @@ func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, 
 	}
 	if cacheControl != "" {
 		option.CacheControl = &cacheControl
+	}
+	if contentDisposition != "" {
+		option.ContentDisposition = &contentDisposition
+	}
+	if contentLanguage != "" {
+		option.ContentLanguage = &contentLanguage
+	}
+	if expires != "" {
+		convertedTime, err := convertStarlarkStringToTime(expires)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert expires time: %w", err)
+		}
+		option.Expires = &convertedTime
 	}
 
 	// Handle metadata
@@ -535,13 +552,17 @@ func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, 
 // putObjectFile uploads a file directly to S3
 func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
-		bucket          = ""
-		key             = ""
-		filePath        = ""
-		contentType     = ""
-		metadata        = starlark.NewDict(0)
-		contentEncoding = ""
-		cacheControl    = ""
+		bucket             = ""
+		key                = ""
+		filePath           = ""
+		contentType        = ""
+		metadata           = starlark.NewDict(0)
+		tags               = starlark.NewDict(0)
+		contentEncoding    = ""
+		cacheControl       = ""
+		contentDisposition = ""
+		contentLanguage    = ""
+		expires            = ""
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
@@ -550,8 +571,12 @@ func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Built
 		"file_path", &filePath,
 		"content_type?", &contentType,
 		"metadata?", &metadata,
+		"tags?", &tags,
 		"content_encoding?", &contentEncoding,
 		"cache_control?", &cacheControl,
+		"content_disposition?", &contentDisposition,
+		"content_language?", &contentLanguage,
+		"expires?", &expires,
 	); err != nil {
 		return none, err
 	}
@@ -568,6 +593,19 @@ func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Built
 	if cacheControl != "" {
 		option.CacheControl = &cacheControl
 	}
+	if contentDisposition != "" {
+		option.ContentDisposition = &contentDisposition
+	}
+	if contentLanguage != "" {
+		option.ContentLanguage = &contentLanguage
+	}
+	if expires != "" {
+		convertedTime, err := convertStarlarkStringToTime(expires)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert expires time: %w", err)
+		}
+		option.Expires = &convertedTime
+	}
 
 	// Handle metadata
 	if metadata.Len() > 0 {
@@ -576,6 +614,15 @@ func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Built
 			return none, fmt.Errorf("failed to convert metadata: %w", err)
 		}
 		option.Metadata = &metadataMap
+	}
+
+	// Handle tags
+	if tags.Len() > 0 {
+		tagsMap, err := convertMetadataDict(tags)
+		if err != nil {
+			return none, fmt.Errorf("failed to convert tags: %w", err)
+		}
+		option.Tags = &tagsMap
 	}
 
 	var opts *ObjectOptions
@@ -770,8 +817,8 @@ func (s *ClientWrapper) setObjectInfo(thread *starlark.Thread, b *starlark.Built
 		tags               = starlark.NewDict(0)
 		contentType        = ""
 		cacheControl       = ""
-		contentEncoding    = ""
 		contentDisposition = ""
+		contentEncoding    = ""
 		contentLanguage    = ""
 		expires            = ""
 	)
@@ -779,12 +826,12 @@ func (s *ClientWrapper) setObjectInfo(thread *starlark.Thread, b *starlark.Built
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"bucket", &bucket,
 		"key", &key,
+		"content_type?", &contentType,
 		"metadata?", &metadata,
 		"tags?", &tags,
-		"content_type?", &contentType,
 		"cache_control?", &cacheControl,
-		"content_encoding?", &contentEncoding,
 		"content_disposition?", &contentDisposition,
+		"content_encoding?", &contentEncoding,
 		"content_language?", &contentLanguage,
 		"expires?", &expires,
 	); err != nil {
