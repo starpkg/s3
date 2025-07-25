@@ -910,14 +910,18 @@ func (s *ClientWrapper) setObjectInfo(thread *starlark.Thread, b *starlark.Built
 // copyObject copies an object from one location to another
 func (s *ClientWrapper) copyObject(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
-		srcBucket       = ""
-		srcKey          = ""
-		dstBucket       = ""
-		dstKey          = ""
-		contentType     = ""
-		metadata        = starlark.NewDict(0)
-		contentEncoding = ""
-		cacheControl    = ""
+		srcBucket          = ""
+		srcKey             = ""
+		dstBucket          = ""
+		dstKey             = ""
+		contentType        = ""
+		metadata           = starlark.NewDict(0)
+		tags               = starlark.NewDict(0)
+		cacheControl       = ""
+		contentDisposition = ""
+		contentEncoding    = ""
+		contentLanguage    = ""
+		expires            = ""
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
@@ -927,8 +931,12 @@ func (s *ClientWrapper) copyObject(thread *starlark.Thread, b *starlark.Builtin,
 		"dst_key", &dstKey,
 		"content_type?", &contentType,
 		"metadata?", &metadata,
+		"tags?", &tags,
 		"content_encoding?", &contentEncoding,
 		"cache_control?", &cacheControl,
+		"content_disposition?", &contentDisposition,
+		"content_language?", &contentLanguage,
+		"expires?", &expires,
 	); err != nil {
 		return none, err
 	}
