@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/1set/starlet"
 	"github.com/1set/starlet/dataconv"
@@ -482,57 +481,10 @@ func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, 
 	// Convert content to reader
 	contentReader := strings.NewReader(content)
 
-	// Build options
-	option := &ObjectOptions{}
-
-	if contentType != "" {
-		option.ContentType = &contentType
-	}
-	if contentEncoding != "" {
-		option.ContentEncoding = &contentEncoding
-	}
-	if cacheControl != "" {
-		option.CacheControl = &cacheControl
-	}
-	if contentDisposition != "" {
-		option.ContentDisposition = &contentDisposition
-	}
-	if contentLanguage != "" {
-		option.ContentLanguage = &contentLanguage
-	}
-	if expires != "" {
-		convertedTime, err := convertStarlarkStringToTime(expires)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert expires time: %w", err)
-		}
-		option.Expires = &convertedTime
-	}
-
-	// Handle metadata
-	if metadata.Len() > 0 {
-		metadataMap, err := convertMetadataDict(metadata)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert metadata: %w", err)
-		}
-		option.Metadata = &metadataMap
-	}
-
-	// Handle tags
-	if tags.Len() > 0 {
-		tagsMap, err := convertMetadataDict(tags)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert tags: %w", err)
-		}
-		option.Tags = &tagsMap
-	}
-
-	// Handle expires
-	if expires != "" {
-		convertedTime, err := convertStarlarkStringToTime(expires)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert expires time: %w", err)
-		}
-		option.Expires = &convertedTime
+	// Parse object options using helper function
+	option, err := parseObjectOptions(contentType, cacheControl, contentDisposition, contentEncoding, contentLanguage, expires, metadata, tags)
+	if err != nil {
+		return none, err
 	}
 
 	var opts *ObjectOptions
@@ -541,7 +493,7 @@ func (s *ClientWrapper) putObject(thread *starlark.Thread, b *starlark.Builtin, 
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.PutObject(ctx, bucket, key, contentReader, opts)
+	err = s.client.PutObject(ctx, bucket, key, contentReader, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to put object: %w", err)
 	}
@@ -581,48 +533,10 @@ func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Built
 		return none, err
 	}
 
-	// Build options
-	option := &ObjectOptions{}
-
-	if contentType != "" {
-		option.ContentType = &contentType
-	}
-	if contentEncoding != "" {
-		option.ContentEncoding = &contentEncoding
-	}
-	if cacheControl != "" {
-		option.CacheControl = &cacheControl
-	}
-	if contentDisposition != "" {
-		option.ContentDisposition = &contentDisposition
-	}
-	if contentLanguage != "" {
-		option.ContentLanguage = &contentLanguage
-	}
-	if expires != "" {
-		convertedTime, err := convertStarlarkStringToTime(expires)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert expires time: %w", err)
-		}
-		option.Expires = &convertedTime
-	}
-
-	// Handle metadata
-	if metadata.Len() > 0 {
-		metadataMap, err := convertMetadataDict(metadata)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert metadata: %w", err)
-		}
-		option.Metadata = &metadataMap
-	}
-
-	// Handle tags
-	if tags.Len() > 0 {
-		tagsMap, err := convertMetadataDict(tags)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert tags: %w", err)
-		}
-		option.Tags = &tagsMap
+	// Parse object options using helper function
+	option, err := parseObjectOptions(contentType, cacheControl, contentDisposition, contentEncoding, contentLanguage, expires, metadata, tags)
+	if err != nil {
+		return none, err
 	}
 
 	var opts *ObjectOptions
@@ -631,7 +545,7 @@ func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Built
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.PutObjectFromFile(ctx, bucket, key, filePath, opts)
+	err = s.client.PutObjectFromFile(ctx, bucket, key, filePath, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to put object from file: %w", err)
 	}
@@ -838,68 +752,14 @@ func (s *ClientWrapper) setObjectInfo(thread *starlark.Thread, b *starlark.Built
 		return none, err
 	}
 
-	// Convert metadata
-	var metadataMap map[string]string
-	if metadata.Len() > 0 {
-		metadataMap = make(map[string]string)
-		for _, item := range metadata.Items() {
-			key := item[0].(starlark.String).GoString()
-			value := item[1].(starlark.String).GoString()
-			metadataMap[key] = value
-		}
-	}
-
-	// Convert tags
-	var tagsMap map[string]string
-	if tags.Len() > 0 {
-		tagsMap = make(map[string]string)
-		for _, item := range tags.Items() {
-			key := item[0].(starlark.String).GoString()
-			value := item[1].(starlark.String).GoString()
-			tagsMap[key] = value
-		}
-	}
-
-	// Convert expires
-	var expiresTime *time.Time
-	if expires != "" {
-		convertedTime, err := convertStarlarkStringToTime(expires)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert expires time: %w", err)
-		}
-		expiresTime = &convertedTime
-	}
-
-	// Build options using the new ObjectOptions struct with pointer types
-	option := &ObjectOptions{}
-
-	if contentType != "" {
-		option.ContentType = &contentType
-	}
-	if len(metadataMap) > 0 {
-		option.Metadata = &metadataMap
-	}
-	if len(tagsMap) > 0 {
-		option.Tags = &tagsMap
-	}
-	if cacheControl != "" {
-		option.CacheControl = &cacheControl
-	}
-	if contentEncoding != "" {
-		option.ContentEncoding = &contentEncoding
-	}
-	if contentDisposition != "" {
-		option.ContentDisposition = &contentDisposition
-	}
-	if contentLanguage != "" {
-		option.ContentLanguage = &contentLanguage
-	}
-	if expiresTime != nil {
-		option.Expires = expiresTime
+	// Parse object options using helper function
+	option, err := parseObjectOptions(contentType, cacheControl, contentDisposition, contentEncoding, contentLanguage, expires, metadata, tags)
+	if err != nil {
+		return none, err
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.SetObjectInfo(ctx, bucket, key, option)
+	err = s.client.SetObjectInfo(ctx, bucket, key, option)
 	if err != nil {
 		return none, fmt.Errorf("failed to set object info: %w", err)
 	}
@@ -941,26 +801,10 @@ func (s *ClientWrapper) copyObject(thread *starlark.Thread, b *starlark.Builtin,
 		return none, err
 	}
 
-	// Build options
-	option := &ObjectOptions{}
-
-	if contentType != "" {
-		option.ContentType = &contentType
-	}
-	if contentEncoding != "" {
-		option.ContentEncoding = &contentEncoding
-	}
-	if cacheControl != "" {
-		option.CacheControl = &cacheControl
-	}
-
-	// Handle metadata
-	if metadata.Len() > 0 {
-		metadataMap, err := convertMetadataDict(metadata)
-		if err != nil {
-			return none, fmt.Errorf("failed to convert metadata: %w", err)
-		}
-		option.Metadata = &metadataMap
+	// Parse object options using helper function
+	option, err := parseObjectOptions(contentType, cacheControl, contentDisposition, contentEncoding, contentLanguage, expires, metadata, tags)
+	if err != nil {
+		return none, err
 	}
 
 	var opts *ObjectOptions
@@ -969,7 +813,7 @@ func (s *ClientWrapper) copyObject(thread *starlark.Thread, b *starlark.Builtin,
 	}
 
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.CopyObject(ctx, srcBucket, srcKey, dstBucket, dstKey, opts)
+	err = s.client.CopyObject(ctx, srcBucket, srcKey, dstBucket, dstKey, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to copy object: %w", err)
 	}

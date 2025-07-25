@@ -118,3 +118,51 @@ func convertStarlarkStringToTime(timeStr string) (time.Time, error) {
 func convertMetadataDict(dict *starlark.Dict) (map[string]string, error) {
 	return convertStarlarkDict(dict)
 }
+
+// parseObjectOptions parses common object options from Starlark arguments
+func parseObjectOptions(contentType, cacheControl, contentDisposition, contentEncoding, contentLanguage, expires string, metadata, tags *starlark.Dict) (*ObjectOptions, error) {
+	option := &ObjectOptions{}
+
+	if contentType != "" {
+		option.ContentType = &contentType
+	}
+	if contentEncoding != "" {
+		option.ContentEncoding = &contentEncoding
+	}
+	if cacheControl != "" {
+		option.CacheControl = &cacheControl
+	}
+	if contentDisposition != "" {
+		option.ContentDisposition = &contentDisposition
+	}
+	if contentLanguage != "" {
+		option.ContentLanguage = &contentLanguage
+	}
+	if expires != "" {
+		convertedTime, err := convertStarlarkStringToTime(expires)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert expires time: %w", err)
+		}
+		option.Expires = &convertedTime
+	}
+
+	// Handle metadata
+	if metadata.Len() > 0 {
+		metadataMap, err := convertMetadataDict(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert metadata: %w", err)
+		}
+		option.Metadata = &metadataMap
+	}
+
+	// Handle tags
+	if tags.Len() > 0 {
+		tagsMap, err := convertMetadataDict(tags)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert tags: %w", err)
+		}
+		option.Tags = &tagsMap
+	}
+
+	return option, nil
+}

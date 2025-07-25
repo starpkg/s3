@@ -56,7 +56,7 @@ func convertAWSObjectToObjectInfo(obj types.Object) ObjectInfo {
 	// Handle checksum algorithms if present
 	if len(obj.ChecksumAlgorithm) > 0 {
 		// Store the first checksum algorithm as a string representation
-		objInfo.VersionId = string(obj.ChecksumAlgorithm[0])
+		objInfo.VersionID = string(obj.ChecksumAlgorithm[0])
 	}
 
 	return objInfo
@@ -122,7 +122,7 @@ func NewClient(ctx context.Context, clientConfig *ClientConfig) (*Client, error)
 	// Create AWS configuration
 	cfg, err := createAWSConfig(ctx, clientConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create AWS config: %w", err)
+		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
 	// Create S3 client with custom endpoint if provided
@@ -546,7 +546,7 @@ func (c *Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Object
 		ContentLanguage:    aws.ToString(result.ContentLanguage),
 		CacheControl:       aws.ToString(result.CacheControl),
 		StorageClass:       string(result.StorageClass),
-		VersionId:          aws.ToString(result.VersionId),
+		VersionID:          aws.ToString(result.VersionId),
 		Metadata:           result.Metadata,
 	}
 
@@ -584,25 +584,6 @@ func (c *Client) SetObjectInfo(ctx context.Context, bucket, key string, opts *Ob
 	_, err := c.client.CopyObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to set object info for %s/%s: %w", bucket, key, err)
-	}
-
-	// Handle tags separately if provided
-	if opts.Tags != nil && len(*opts.Tags) > 0 {
-		tagSet := tagsToAWSTagSet(*opts.Tags)
-		if tagSet != nil {
-			tagInput := &s3.PutObjectTaggingInput{
-				Bucket: aws.String(bucket),
-				Key:    aws.String(key),
-				Tagging: &types.Tagging{
-					TagSet: tagSet,
-				},
-			}
-
-			_, err = c.client.PutObjectTagging(ctx, tagInput)
-			if err != nil {
-				return fmt.Errorf("failed to set object tags for %s/%s: %w", bucket, key, err)
-			}
-		}
 	}
 
 	return nil
@@ -780,7 +761,7 @@ type ObjectInfo struct {
 	CacheControl       string            `json:"cache_control,omitempty"`
 	Expires            *time.Time        `json:"expires,omitempty"`
 	StorageClass       string            `json:"storage_class,omitempty"`
-	VersionId          string            `json:"version_id,omitempty"`
+	VersionID          string            `json:"version_id,omitempty"`
 	IsLatest           bool              `json:"is_latest,omitempty"`
 	Owner              string            `json:"owner,omitempty"`
 	Metadata           map[string]string `json:"metadata,omitempty"`
@@ -809,7 +790,7 @@ func (o *ObjectInfo) MarshalStarlark() (starlark.Value, error) {
 	}
 
 	dict.SetKey(starlark.String("storage_class"), starlark.String(o.StorageClass))
-	dict.SetKey(starlark.String("version_id"), starlark.String(o.VersionId))
+	dict.SetKey(starlark.String("version_id"), starlark.String(o.VersionID))
 	dict.SetKey(starlark.String("is_latest"), starlark.Bool(o.IsLatest))
 	dict.SetKey(starlark.String("owner"), starlark.String(o.Owner))
 	dict.SetKey(starlark.String("metadata"), stringMapToStarlark(o.Metadata))
@@ -833,7 +814,7 @@ type ListObjectsResult struct {
 }
 
 // MarshalStarlark implements the Marshaler interface for ListObjectsResult
-// Returns a list of objects directly instead of a dict with "contents" key
+// Returns a dict with all ListObjectsResult fields
 func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
 	// Convert Contents slice to Starlark list
 	contentsList := starlark.NewList(make([]starlark.Value, len(l.Contents)))
@@ -845,8 +826,23 @@ func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
 		contentsList.SetIndex(i, objValue)
 	}
 
-	// Return the list directly instead of wrapping in a dict
-	return contentsList, nil
+	// Convert CommonPrefixes to Starlark list
+	prefixesList := starlark.NewList(make([]starlark.Value, len(l.CommonPrefixes)))
+	for i, prefix := range l.CommonPrefixes {
+		prefixesList.SetIndex(i, starlark.String(prefix))
+	}
+
+	// Create dictionary with all fields
+	dict := starlark.NewDict(7)
+	dict.SetKey(starlark.String("contents"), contentsList)
+	dict.SetKey(starlark.String("common_prefixes"), prefixesList)
+	dict.SetKey(starlark.String("is_truncated"), starlark.Bool(l.IsTruncated))
+	dict.SetKey(starlark.String("next_marker"), starlark.String(l.NextMarker))
+	dict.SetKey(starlark.String("max_keys"), starlark.MakeInt(l.MaxKeys))
+	dict.SetKey(starlark.String("prefix"), starlark.String(l.Prefix))
+	dict.SetKey(starlark.String("delimiter"), starlark.String(l.Delimiter))
+
+	return dict, nil
 }
 
 // Ensure ListObjectsResult implements dataconv.Marshaler

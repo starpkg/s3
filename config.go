@@ -191,6 +191,15 @@ func (o *ObjectOptions) ApplyToCopyObject(input *s3.CopyObjectInput) {
 		input.Expires = o.Expires
 		needsReplace = true
 	}
+	if o.Tags != nil {
+		// Convert tags to URL-encoded string format for copy operations
+		var tagPairs []string
+		for k, v := range *o.Tags {
+			tagPairs = append(tagPairs, fmt.Sprintf("%s=%s", k, v))
+		}
+		input.Tagging = aws.String(strings.Join(tagPairs, "&"))
+		// Note: Tags don't require MetadataDirectiveReplace
+	}
 
 	// Only set metadata directive if we're actually changing something
 	if needsReplace {
