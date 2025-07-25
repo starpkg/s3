@@ -360,6 +360,26 @@ func (c *Client) GetBucketInfo(ctx context.Context, bucket string) (*BucketInfo,
 	info.ObjectCount = objectCount
 	info.TotalSize = totalSize
 
+	// Get bucket tags with a separate API call
+	tagsInput := &s3.GetBucketTaggingInput{
+		Bucket: aws.String(bucket),
+	}
+
+	tagsResult, err := c.client.GetBucketTagging(ctx, tagsInput)
+	if err != nil {
+		// Tags might not be accessible or bucket might not have tags
+		// Don't fail the entire operation, just initialize empty tags
+		info.Tags = make(map[string]string)
+	} else {
+		// Convert AWS tags to map
+		info.Tags = make(map[string]string)
+		for _, tag := range tagsResult.TagSet {
+			if tag.Key != nil && tag.Value != nil {
+				info.Tags[*tag.Key] = *tag.Value
+			}
+		}
+	}
+
 	return info, nil
 }
 
@@ -553,6 +573,27 @@ func (c *Client) GetObjectInfo(ctx context.Context, bucket, key string) (*Object
 	// Handle expires field if present
 	if result.Expires != nil {
 		objInfo.Expires = result.Expires
+	}
+
+	// Get object tags with a separate API call
+	tagsInput := &s3.GetObjectTaggingInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	tagsResult, err := c.client.GetObjectTagging(ctx, tagsInput)
+	if err != nil {
+		// Tags might not be accessible or object might not have tags
+		// Don't fail the entire operation, just log and continue
+		objInfo.Tags = make(map[string]string)
+	} else {
+		// Convert AWS tags to map
+		objInfo.Tags = make(map[string]string)
+		for _, tag := range tagsResult.TagSet {
+			if tag.Key != nil && tag.Value != nil {
+				objInfo.Tags[*tag.Key] = *tag.Value
+			}
+		}
 	}
 
 	return objInfo, nil
@@ -826,23 +867,25 @@ func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
 		contentsList.SetIndex(i, objValue)
 	}
 
-	// Convert CommonPrefixes to Starlark list
-	prefixesList := starlark.NewList(make([]starlark.Value, len(l.CommonPrefixes)))
-	for i, prefix := range l.CommonPrefixes {
-		prefixesList.SetIndex(i, starlark.String(prefix))
-	}
+	return contentsList, nil
 
-	// Create dictionary with all fields
-	dict := starlark.NewDict(7)
-	dict.SetKey(starlark.String("contents"), contentsList)
-	dict.SetKey(starlark.String("common_prefixes"), prefixesList)
-	dict.SetKey(starlark.String("is_truncated"), starlark.Bool(l.IsTruncated))
-	dict.SetKey(starlark.String("next_marker"), starlark.String(l.NextMarker))
-	dict.SetKey(starlark.String("max_keys"), starlark.MakeInt(l.MaxKeys))
-	dict.SetKey(starlark.String("prefix"), starlark.String(l.Prefix))
-	dict.SetKey(starlark.String("delimiter"), starlark.String(l.Delimiter))
+	// // Convert CommonPrefixes to Starlark list
+	// prefixesList := starlark.NewList(make([]starlark.Value, len(l.CommonPrefixes)))
+	// for i, prefix := range l.CommonPrefixes {
+	// 	prefixesList.SetIndex(i, starlark.String(prefix))
+	// }
 
-	return dict, nil
+	// // Create dictionary with all fields
+	// dict := starlark.NewDict(7)
+	// dict.SetKey(starlark.String("contents"), contentsList)
+	// dict.SetKey(starlark.String("common_prefixes"), prefixesList)
+	// dict.SetKey(starlark.String("is_truncated"), starlark.Bool(l.IsTruncated))
+	// dict.SetKey(starlark.String("next_marker"), starlark.String(l.NextMarker))
+	// dict.SetKey(starlark.String("max_keys"), starlark.MakeInt(l.MaxKeys))
+	// dict.SetKey(starlark.String("prefix"), starlark.String(l.Prefix))
+	// dict.SetKey(starlark.String("delimiter"), starlark.String(l.Delimiter))
+
+	// return dict, nil
 }
 
 // Ensure ListObjectsResult implements dataconv.Marshaler

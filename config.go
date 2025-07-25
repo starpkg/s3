@@ -198,7 +198,8 @@ func (o *ObjectOptions) ApplyToCopyObject(input *s3.CopyObjectInput) {
 			tagPairs = append(tagPairs, fmt.Sprintf("%s=%s", k, v))
 		}
 		input.Tagging = aws.String(strings.Join(tagPairs, "&"))
-		// Note: Tags don't require MetadataDirectiveReplace
+		// Set TaggingDirective to REPLACE to ensure tags are replaced
+		input.TaggingDirective = types.TaggingDirectiveReplace
 	}
 
 	// Only set metadata directive if we're actually changing something
