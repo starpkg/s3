@@ -866,26 +866,7 @@ func (l *ListObjectsResult) MarshalStarlark() (starlark.Value, error) {
 		}
 		contentsList.SetIndex(i, objValue)
 	}
-
 	return contentsList, nil
-
-	// // Convert CommonPrefixes to Starlark list
-	// prefixesList := starlark.NewList(make([]starlark.Value, len(l.CommonPrefixes)))
-	// for i, prefix := range l.CommonPrefixes {
-	// 	prefixesList.SetIndex(i, starlark.String(prefix))
-	// }
-
-	// // Create dictionary with all fields
-	// dict := starlark.NewDict(7)
-	// dict.SetKey(starlark.String("contents"), contentsList)
-	// dict.SetKey(starlark.String("common_prefixes"), prefixesList)
-	// dict.SetKey(starlark.String("is_truncated"), starlark.Bool(l.IsTruncated))
-	// dict.SetKey(starlark.String("next_marker"), starlark.String(l.NextMarker))
-	// dict.SetKey(starlark.String("max_keys"), starlark.MakeInt(l.MaxKeys))
-	// dict.SetKey(starlark.String("prefix"), starlark.String(l.Prefix))
-	// dict.SetKey(starlark.String("delimiter"), starlark.String(l.Delimiter))
-
-	// return dict, nil
 }
 
 // Ensure ListObjectsResult implements dataconv.Marshaler
