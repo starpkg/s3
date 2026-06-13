@@ -57,7 +57,7 @@ func NewModule() *Module {
 
 // genConfigOption creates a configuration option with common settings
 func genConfigOption[T any](name, description string, defaultValue T) *base.ConfigOption[T] {
-	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(strings.ReplaceAll(name, "_", "_")))
+	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(name))
 
 	return base.NewConfigOption(defaultValue).
 		WithName(name).
@@ -67,7 +67,7 @@ func genConfigOption[T any](name, description string, defaultValue T) *base.Conf
 
 // genSecretConfigOption creates a secret configuration option
 func genSecretConfigOption(name, description, defaultValue string) *base.ConfigOption[string] {
-	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(strings.ReplaceAll(name, "_", "_")))
+	envVar := fmt.Sprintf("S3_%s", strings.ToUpper(name))
 
 	return base.NewConfigOption(defaultValue).
 		WithName(name).
@@ -217,20 +217,6 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 // Helper functions for config value resolution
 func getConfigValue(moduleDefault, override string) string {
 	if override != "" {
-		return override
-	}
-	return moduleDefault
-}
-
-func getBoolConfigValue(moduleDefault bool, override *bool) bool {
-	if override != nil {
-		return *override
-	}
-	return moduleDefault
-}
-
-func getBoolConfigValueDirect(moduleDefault bool, override bool, hasOverride bool) bool {
-	if hasOverride {
 		return override
 	}
 	return moduleDefault
