@@ -39,7 +39,7 @@ func NewModule() *Module {
 		genConfigOption(configKeyServiceType, "Default S3 service type (aws, minio, digitalocean, etc.)", "auto"),
 		genSecretConfigOption(configKeyAccessKey, "Default S3 access key ID", ""),
 		genSecretConfigOption(configKeySecretKey, "Default S3 secret access key", ""),
-		genConfigOption(configKeySessionToken, "Default S3 session token", ""),
+		genSecretConfigOption(configKeySessionToken, "Default S3 session token", ""),
 		genConfigOption(configKeyRegion, "Default S3 region", "us-east-1"),
 		genConfigOption(configKeyEndpoint, "Default S3 endpoint URL", ""),
 		genConfigOption(configKeyForcePathStyle, "Default force path-style addressing", false),
@@ -131,9 +131,6 @@ func (m *Module) LoadModule() starlet.ModuleLoader {
 func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var (
 		serviceType    = ""
-		accessKey      = ""
-		secretKey      = ""
-		sessionToken   = ""
 		region         = ""
 		endpoint       = ""
 		forcePathStyle = types.NewNullableBool(starlark.False)
@@ -147,11 +144,13 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 	)
 
 	// Parse arguments - all optional
+	// Credentials are intentionally NOT accepted here: they must be injected by
+	// the host (via the access_key/secret_key/session_token config options, the
+	// S3_* environment variables, or the AWS default credential chain), never
+	// passed as literals from an untrusted script. Passing access_key= etc. is
+	// rejected by UnpackArgs as an unexpected keyword argument.
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"service_type?", &serviceType,
-		"access_key?", &accessKey,
-		"secret_key?", &secretKey,
-		"session_token?", &sessionToken,
 		"region?", &region,
 		"endpoint?", &endpoint,
 		"force_path_style?", forcePathStyle,
@@ -176,10 +175,11 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 
 	// Get configuration values from module, using provided values as overrides
 	config := &ClientConfig{
-		ServiceType:    getConfigValue(m.ext.GetString(configKeyServiceType), serviceType),
-		AccessKey:      getConfigValue(m.ext.GetString(configKeyAccessKey), accessKey),
-		SecretKey:      getConfigValue(m.ext.GetString(configKeySecretKey), secretKey),
-		SessionToken:   getConfigValue(m.ext.GetString(configKeySessionToken), sessionToken),
+		ServiceType: getConfigValue(m.ext.GetString(configKeyServiceType), serviceType),
+		// Host-injected only (no script override).
+		AccessKey:      m.ext.GetString(configKeyAccessKey),
+		SecretKey:      m.ext.GetString(configKeySecretKey),
+		SessionToken:   m.ext.GetString(configKeySessionToken),
 		Region:         getConfigValue(m.ext.GetString(configKeyRegion), region),
 		Endpoint:       getConfigValue(m.ext.GetString(configKeyEndpoint), endpoint),
 		ForcePathStyle: getBoolConfigValue(m.ext.GetBool(configKeyForcePathStyle), forcePathStyle),
