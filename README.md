@@ -25,6 +25,23 @@ The S3 module provides a comprehensive, easy-to-use interface for interacting wi
 
 
 
+## 🔑 Credentials (host-injected)
+
+Credentials are **never passed from a Starlark script**. They are injected by
+the Go host, so an untrusted script can use S3 without ever seeing or hardcoding
+secret keys. `create_client(...)` does **not** accept `access_key` / `secret_key`
+/ `session_token`; passing them raises an `unexpected keyword argument` error.
+
+Provide credentials by either:
+
+- **Environment variables** `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_SESSION_TOKEN`
+  (these back the module's secret config options), or
+- the **AWS default credential chain** (`AWS_ACCESS_KEY_ID`, shared config/profile,
+  IAM role, etc.).
+
+A script may still choose the provider/region/endpoint (non-secret), e.g.
+`create_client(service_type="minio", endpoint="localhost:9000")`.
+
 ## 🚀 Quick Start
 
 ### Basic Usage
@@ -36,8 +53,6 @@ load("s3", "create_client")
 # Create a client with smart provider detection
 client = create_client(
     region="us-west-2",
-    access_key="AKIAIOSFODNN7EXAMPLE",  # Automatically detects AWS S3
-    secret_key="your-secret-key",
 )
 
 # Create a bucket
@@ -110,8 +125,6 @@ load("s3", "create_client")
 client = create_client(
     service_type="minio",
     endpoint="localhost:9000",
-    access_key="minioadmin",
-    secret_key="minioadmin",
     use_ssl=False,
 )
 
@@ -134,8 +147,6 @@ load("s3", "create_client")
 load("time", "now")
 
 client = create_client(
-    access_key="your-access-key",
-    secret_key="your-secret-key",
     region="us-west-2"
 )
 
@@ -174,35 +185,32 @@ load("s3", "create_client")
 # Smart detection based on endpoint
 client = create_client(
     endpoint="https://e0ed38ec5a87ac84d936841eee7336b2.r2.cloudflarestorage.com",
-    access_key="your-key",
-    secret_key="your-secret"
 )
 # ✅ Automatically detects Cloudflare R2
 
 # Smart detection based on region
 client = create_client(
     region="auto",  # R2-specific region
-    access_key="f1889d933799dc332549e6671a042e36",  # 32-char hex pattern
-    secret_key="your-secret"
 )
 # ✅ Automatically detects Cloudflare R2
 
-# Smart detection based on access key pattern
+# Smart detection based on region pattern
 client = create_client(
-    access_key="AKIAIOSFODNN7EXAMPLE",  # AWS pattern
-    secret_key="your-secret",
     region="us-west-2"
 )
 # ✅ Automatically detects AWS S3
 
 # Smart detection for MinIO
 client = create_client(
-    access_key="minioadmin",  # Default MinIO credentials
-    secret_key="minioadmin",
     endpoint="localhost:9000"
 )
 # ✅ Automatically detects MinIO
 ```
+
+> Detection can also key off the **access key pattern** (e.g. an `AKIA…` key
+> ⇒ AWS), but since credentials are host-injected (see [Credentials](#-credentials-host-injected)),
+> that signal comes from the host's key, not from the script. Prefer
+> `service_type` or `endpoint` for explicit selection in scripts.
 
 ### Detection Rules & Priority
 
@@ -267,8 +275,6 @@ You can always override automatic detection by explicitly specifying `service_ty
 # Force MinIO even with AWS-like credentials
 client = create_client(
     service_type="minio",  # Explicit override
-    access_key="AKIAIOSFODNN7EXAMPLE",  # Would normally detect AWS
-    secret_key="your-secret",
     endpoint="localhost:9000"
 )
 ```
@@ -280,8 +286,6 @@ Existing scripts automatically benefit from smart detection without any changes:
 ```python
 # Old script - still works perfectly
 client = create_client(
-    access_key="AKIAIOSFODNN7EXAMPLE",
-    secret_key="your-secret",
     region="us-west-2"
 )
 # ✅ Automatically detects AWS S3 - no migration needed!
@@ -907,16 +911,12 @@ load("s3", "create_client")
 aws_client = create_client(
     service_type="aws",
     region="us-west-2",
-    access_key="AKIAIOSFODNN7EXAMPLE",
-    secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 )
 
 # MinIO
 minio_client = create_client(
     service_type="minio",
     endpoint="localhost:9000",
-    access_key="minioadmin",
-    secret_key="minioadmin",
     use_ssl=False,
 )
 
@@ -924,16 +924,12 @@ minio_client = create_client(
 do_client = create_client(
     service_type="digitalocean",
     region="nyc3",
-    access_key="your-spaces-key",
-    secret_key="your-spaces-secret",
 )
 
 # Cloudflare R2
 r2_client = create_client(
     service_type="cloudflare",
     endpoint="your-account-id.r2.cloudflarestorage.com",
-    access_key="your-r2-access-key",
-    secret_key="your-r2-secret-key",
 )
 ```
 
@@ -946,8 +942,6 @@ load("s3", "create_client", "parse_s3_url", "validate_bucket_name", "get_public_
 client = create_client(
     service_type="aws",
     region="eu-west-1",
-    access_key="your-access-key",
-    secret_key="your-secret-key",
     timeout=60,
     max_retries=5,
     part_size=10485760,  # 10MB parts
@@ -1081,8 +1075,6 @@ def safe_s3_operation():
         client = create_client(
             service_type="aws",
             region="us-west-2",
-            access_key="your-access-key",
-            secret_key="your-secret-key",
         )
         
         # Try to create bucket
