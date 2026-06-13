@@ -21,7 +21,7 @@ These are the names registered by `LoadModule` (loadable via `load("s3", ...)`).
 |----------|-----------|-------------|
 | `create_client` | `create_client(**kwargs) -> Client` | Create an S3 client (see [Configuration](#configuration) for accepted keyword arguments). Credentials are **not** accepted here — they are host-injected. |
 | `validate_bucket_name` | `validate_bucket_name(name) -> bool` | Report whether `name` is a valid S3 bucket name. |
-| `validate_object_key` | `validate_object_key(key) -> bool` | Report whether `key` is a valid S3 object key (non-empty, ≤ 1024 bytes, no ASCII control characters `0x00`–`0x1F`). |
+| `validate_object_key` | `validate_object_key(key) -> bool` | Report whether `key` is a valid S3 object key (non-empty, ≤ 1024 bytes, no ASCII control characters `0x00`–`0x0F`). |
 | `get_supported_services` | `get_supported_services() -> list[str]` | List the supported service-type strings (e.g. `"aws"`, `"minio"`, `"cloudflare"`). |
 
 The `Client` value returned by `create_client` exposes these methods:
@@ -138,7 +138,7 @@ a priority-ordered rule engine:
 | Backblaze B2 | `"backblaze"` | `us-west-000` |
 | Cloudflare R2 | `"cloudflare"` | `auto` |
 | Scaleway | `"scaleway"` | `fr-par` |
-| Alibaba Cloud OSS | `"alibaba"` | `oss-cn-hangzhou` |
+| Alibaba Cloud OSS | `"alibaba"` | `cn-hangzhou` |
 | Google Cloud Storage | `"google"` | `us-central1` |
 | Oracle Cloud | `"oracle"` | `us-ashburn-1` |
 | IBM Cloud | `"ibm"` | `us-south` |
@@ -174,7 +174,7 @@ whether credentials are present with `client.get_client_info()` (which reports
 `*_set` booleans, never the secret values).
 
 `validate_object_key` rejects keys that are empty, longer than 1024 bytes, or
-that contain ASCII control characters (`0x00`–`0x1F`).
+that contain ASCII control characters (`0x00`–`0x0F`).
 
 ## Configuration
 
