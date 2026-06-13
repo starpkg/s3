@@ -77,6 +77,56 @@ test_client_creation()
 	}
 }
 
+// TestS3ClientInfoAndPublicURL covers the two client methods the README
+// documents as the client-config surface: get_client_info() (which exposes the
+// resolved non-secret config plus *_set booleans, never the secret values) and
+// get_public_url(bucket, key) (which reads region/endpoint/service_type from the
+// client's own config). It also pins the env-var idiom: S3_* overrides resolve
+// through genConfigOption, where the env var is S3_ + the uppercased option
+// name.
+func TestS3ClientInfoAndPublicURL(t *testing.T) {
+	// Host-injected, non-secret config via S3_* env vars. genConfigOption maps
+	// "region" -> S3_REGION and "user_agent" -> S3_USER_AGENT.
+	t.Setenv("S3_REGION", "eu-central-1")
+	t.Setenv("S3_USER_AGENT", "regression-agent/9.9")
+
+	script := `
+load("s3", "create_client")
+
+def test_client_info_and_public_url():
+    client = create_client(service_type="aws")
+
+    info = client.get_client_info()
+    if info.service_type != "aws":
+        fail("service_type not reported: " + info.service_type)
+    if info.region != "eu-central-1":
+        fail("S3_REGION env var did not resolve through genConfigOption: " + info.region)
+    if info.user_agent != "regression-agent/9.9":
+        fail("S3_USER_AGENT env var did not resolve: " + info.user_agent)
+    # Secrets must be reported only as presence booleans, never as values.
+    if info.access_key_set != False:
+        fail("access_key_set should be False with no credentials injected")
+
+    url = client.get_public_url("my-bucket", "path/to/file.txt")
+    if "my-bucket" not in url or "path/to/file.txt" not in url:
+        fail("public URL missing bucket/key: " + url)
+
+    print("client info + public url ok")
+
+test_client_info_and_public_url()
+`
+
+	runner := starlet.NewDefault()
+	loaders := make(map[string]starlet.ModuleLoader)
+	loaders[ModuleName] = NewModule().LoadModule()
+	runner.SetLazyloadModules(loaders)
+
+	runner.SetScriptContent([]byte(script))
+	if _, err := runner.Run(); err != nil {
+		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
 func TestS3UtilityFunctions(t *testing.T) {
 	// Test utility functions
 	script := `
