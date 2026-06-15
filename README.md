@@ -1,11 +1,29 @@
 # 🗂️ `s3` — S3-compatible storage for Starlark
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/starpkg/s3.svg)](https://pkg.go.dev/github.com/starpkg/s3)
+[![license](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 Universal S3-compatible storage operations for Starlark scripts. Built on the
 AWS SDK for Go v2, the module works with Amazon S3, MinIO, DigitalOcean Spaces,
 Cloudflare R2, Wasabi, Backblaze B2, and other S3-compatible services, with
 smart provider auto-detection from endpoints, regions, and credentials.
+
+Within the starpkg philosophy — *support for necessary local operations plus
+simple abstractions over common online services, for ease of use* — `s3` is an
+**online-service abstraction**: it puts a small, uniform Starlark surface over a
+family of remote object stores. It also touches the **local** filesystem at two
+points (`put_object_file` reads a local file to upload, `get_object_file` writes
+a downloaded object to a local file), so it straddles the line, but its centre of
+gravity is the online service.
+
+At a glance, `LoadModule` registers four module functions — `create_client`,
+`validate_bucket_name`, `validate_object_key`, `get_supported_services` — and a
+`create_client(...)` call returns a client exposing these methods:
+`get_client_info`, `get_public_url`, `presign_url`, `create_bucket`,
+`delete_bucket`, `list_buckets`, `bucket_exists`, `get_bucket_info`,
+`put_object`, `put_object_file`, `get_object`, `get_object_file`,
+`delete_object`, `list_objects`, `object_exists`, `get_object_info`,
+`set_object_info`, `copy_object`. Each is documented below.
 
 ## Installation
 
@@ -30,7 +48,7 @@ The `Client` value returned by `create_client` exposes these methods:
 |--------|-----------|-------------|
 | `get_client_info` | `client.get_client_info() -> struct` | Return the client's effective config: `service_type`, `region`, `endpoint`, the non-secret options, and `access_key_set` / `secret_key_set` / `session_token_set` booleans (secret values are never exposed). |
 | `get_public_url` | `client.get_public_url(bucket, key) -> str` | Build a public HTTP(S) URL for an object using the client's own `region` / `endpoint` / `use_ssl` / `service_type` config. |
-| `presign_url` | `client.presign_url(bucket, key, expires_in=3600, method="GET") -> str` | Generate a pre-signed URL (`method` is `"GET"` or `"HEAD"`). |
+| `presign_url` | `client.presign_url(bucket, key, expires_in=3600, method="GET") -> str` | Generate a pre-signed URL valid for `expires_in` seconds. `method` is `"GET"`, `"PUT"`, or `"HEAD"` (case-insensitive); any other value is an error. |
 | `create_bucket` | `client.create_bucket(bucket, region=None)` | Create a bucket. |
 | `delete_bucket` | `client.delete_bucket(bucket, force=False)` | Delete a bucket (`force=True` deletes its objects first). |
 | `list_buckets` | `client.list_buckets() -> list[dict]` | List buckets in the account. |
@@ -178,15 +196,20 @@ that contain ASCII control characters (`0x00`–`0x0F`).
 
 ## Configuration
 
-All options are accepted as keyword arguments to `create_client(...)` and back
-the module's defaults.
+These are the module's config options and their defaults. The non-secret options
+are also accepted as keyword arguments to `create_client(...)` (a script-supplied
+value overrides the module default). The three **secret** options
+(`access_key` / `secret_key` / `session_token`) are **host-injected only** — they
+are *not* accepted as `create_client(...)` keyword arguments (passing them raises
+an `unexpected keyword argument` error); set them via the `S3_*` environment
+variables, the host config, or the AWS default credential chain (see [Safety](#safety)).
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `service_type` | `string` | `"auto"` | S3 service type (`aws`, `minio`, `cloudflare`, …); `"auto"` enables detection |
-| `access_key` | `string` | `""` | Access key ID (secret; host-injected only) |
-| `secret_key` | `string` | `""` | Secret access key (secret; host-injected only) |
-| `session_token` | `string` | `""` | Session token for temporary credentials (secret; host-injected only) |
+| `access_key` | `string` | `""` | Access key ID (secret; host-injected only, not a `create_client` kwarg) |
+| `secret_key` | `string` | `""` | Secret access key (secret; host-injected only, not a `create_client` kwarg) |
+| `session_token` | `string` | `""` | Session token for temporary credentials (secret; host-injected only, not a `create_client` kwarg) |
 | `region` | `string` | `"us-east-1"` | S3 region |
 | `endpoint` | `string` | `""` | Custom S3 endpoint URL |
 | `force_path_style` | `bool` | `false` | Force path-style addressing |

@@ -285,29 +285,37 @@ func NewClientWrapper(client *Client) *ClientWrapper {
 	return cw
 }
 
-// Implement starlark.Value interface
+// String implements starlark.Value; it renders the client as
+// "<s3.Client service_type=… region=…>" for printing and error messages.
 func (cw *ClientWrapper) String() string {
 	config := cw.client.GetConfig()
 	return fmt.Sprintf("<s3.Client service_type=%s region=%s>", config.ServiceType, config.Region)
 }
 
+// Type implements starlark.Value and returns the Starlark type name "s3.Client".
 func (cw *ClientWrapper) Type() string {
 	return "s3.Client"
 }
 
+// Freeze implements starlark.Value. The client is immutable after creation, so
+// freezing is a no-op.
 func (cw *ClientWrapper) Freeze() {
 	// Client is immutable after creation
 }
 
+// Truth implements starlark.Value; a client is always truthy.
 func (cw *ClientWrapper) Truth() starlark.Bool {
 	return starlark.True
 }
 
+// Hash implements starlark.Value. The client is unhashable (it cannot be used as
+// a dict key), so this always returns an error.
 func (cw *ClientWrapper) Hash() (uint32, error) {
 	return 0, fmt.Errorf("unhashable type: %s", cw.Type())
 }
 
-// Implement starlark.HasAttrs interface
+// Attr implements starlark.HasAttrs, resolving a method name (e.g. "put_object")
+// to its bound builtin, or returning a no-such-attribute error.
 func (cw *ClientWrapper) Attr(name string) (starlark.Value, error) {
 	// Check for methods using map lookup
 	if methodFunc, exists := cw.methodMap[name]; exists {
@@ -317,6 +325,8 @@ func (cw *ClientWrapper) Attr(name string) (starlark.Value, error) {
 	return nil, starlark.NoSuchAttrError(fmt.Sprintf("%s has no .%s attribute", cw.Type(), name))
 }
 
+// AttrNames implements starlark.HasAttrs and lists every callable method name on
+// the client (used for dir() and attribute completion).
 func (cw *ClientWrapper) AttrNames() []string {
 	return cw.allNames
 }
