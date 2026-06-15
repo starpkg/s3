@@ -119,6 +119,7 @@ via `MarshalStarlark` / `dataconv.Marshal`.
 
 Group by functional goal — **do not add one `*_test.go` per fix.** Two thematic
 files are the home:
+
 - **`detection_test.go`** — Go-level unit tests for provider detection and config
   validation (credentials are host config, so access-key-pattern detection is
   tested here with `ClientConfig` values, not from scripts).
@@ -134,6 +135,7 @@ cases self-skip when creds/endpoints are absent.
 
 Three layers must stay in sync (enforced by the doc standard,
 `plan/starpkg文档标准（DOC-STD）`):
+
 - **`README.md`** — every script-facing builtin and client method documented as a
   backtick whole-word (the `doccov` gate fails on omission); the *Configuration*
   and *Safety* sections cover the host-side config keys, `S3_*` env vars, and the
