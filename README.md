@@ -2,6 +2,8 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/starpkg/s3.svg)](https://pkg.go.dev/github.com/starpkg/s3)
 [![license](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/starpkg/s3/graph/badge.svg)](https://codecov.io/gh/starpkg/s3)
+![binary footprint](https://img.shields.io/badge/binary_footprint-%2B7.5_MB-blue)
 
 Universal S3-compatible storage operations for Starlark scripts. Built on the
 AWS SDK for Go v2, the module works with Amazon S3, MinIO, DigitalOcean Spaces,
