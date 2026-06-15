@@ -2,6 +2,12 @@
 # Test files are validated by running them (go test -race), not by static
 # complexity analysis — Lizard's cyclomatic/length rules misfire on
 # table-driven tests. Production code stays fully analyzed.
+#
+# docs/** holds the API reference, whose substance is validated by doccov, not
+# markdownlint: it legitimately repeats method-name headings (close/execute on
+# different objects → MD024) and uses tables (MD060). README.md stays linted —
+# it is the front page.
 exclude_paths:
   - "**/*_test.go"
   - "*_test.go"
+  - "docs/**"
