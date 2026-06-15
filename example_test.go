@@ -2,11 +2,27 @@ package s3
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/1set/starlet"
 	"github.com/starpkg/base"
+	"go.starlark.net/starlark"
 )
+
+// runS3Script loads the s3 module and runs the given script content, returning
+// any execution error. It is the shared harness for the offline error-branch
+// sections below — none of these scripts touch the network: they exercise the
+// argument-parsing/validation/conversion code that runs before any AWS call.
+func runS3Script(t *testing.T, script string) error {
+	t.Helper()
+	runner := starlet.NewDefault()
+	loaders := map[string]starlet.ModuleLoader{ModuleName: NewModule().LoadModule()}
+	runner.SetLazyloadModules(loaders)
+	runner.SetScriptContent([]byte(script))
+	_, err := runner.Run()
+	return err
+}
 
 // TestStarlarkScripts runs the Starlark integration scripts from the private
 // fixtures directory (../test/s3). They exercise live S3-compatible endpoints
@@ -436,6 +452,186 @@ test_validation_functions()
 	_, err := runner.Run()
 	if err != nil {
 		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
+// TestS3ScriptErrorBranches drives the error paths of the module's builtins
+// that execute *before* any network call: missing/extra arguments, the
+// host-injected-credentials rule (PKG-15), and the offline conversion/parse
+// failures (RFC3339 expires, non-string metadata/tags, unsupported presign
+// method). Each must surface as a clean Starlark-level error — never a host
+// panic (invariant 3). Building a MinIO/AWS client locally needs no network,
+// and the failing call here is the offline arg/option parsing inside the
+// builtin, so these are hermetic.
+func TestS3ScriptErrorBranches(t *testing.T) {
+	const mkClient = `
+load("s3", "create_client")
+c = create_client(service_type="minio", endpoint="localhost:9000", use_ssl=False)
+`
+	cases := []struct {
+		name   string
+		script string
+		want   string // substring expected in the error
+	}{
+		{
+			name:   "credentials are never script kwargs (PKG-15)",
+			script: `load("s3", "create_client")` + "\n" + `create_client(access_key="AKIA...")`,
+			want:   `unexpected keyword argument "access_key"`,
+		},
+		{
+			name:   "secret_key kwarg rejected (PKG-15)",
+			script: `load("s3", "create_client")` + "\n" + `create_client(secret_key="x")`,
+			want:   `unexpected keyword argument "secret_key"`,
+		},
+		{
+			name:   "session_token kwarg rejected (PKG-15)",
+			script: `load("s3", "create_client")` + "\n" + `create_client(session_token="x")`,
+			want:   `unexpected keyword argument "session_token"`,
+		},
+		{
+			name:   "put_object missing required args",
+			script: mkClient + `c.put_object()`,
+			want:   "missing argument for bucket",
+		},
+		{
+			name:   "create_bucket missing bucket",
+			script: mkClient + `c.create_bucket()`,
+			want:   "missing argument for bucket",
+		},
+		{
+			name:   "copy_object missing args",
+			script: mkClient + `c.copy_object("sb", "sk")`,
+			want:   "missing argument for dst_bucket",
+		},
+		{
+			name:   "put_object invalid expires time",
+			script: mkClient + `c.put_object("b", "k", "data", expires="not-a-time")`,
+			want:   "failed to convert expires time",
+		},
+		{
+			name:   "put_object non-string metadata value",
+			script: mkClient + `c.put_object("b", "k", "data", metadata={"n": 5})`,
+			want:   "value must be a string",
+		},
+		{
+			name:   "put_object non-string metadata key",
+			script: mkClient + `c.put_object("b", "k", "data", metadata={5: "v"})`,
+			want:   "key must be a string",
+		},
+		{
+			name:   "set_object_info non-string tag value",
+			script: mkClient + `c.set_object_info("b", "k", tags={"x": True})`,
+			want:   "value must be a string",
+		},
+		{
+			name:   "presign_url unsupported method",
+			script: mkClient + `c.presign_url("b", "k", method="DELETE")`,
+			want:   "unsupported method: DELETE",
+		},
+		{
+			name:   "presign_url expires_in out of 64-bit range",
+			script: mkClient + `c.presign_url("b", "k", expires_in=100000000000000000000000)`,
+			want:   "out of range",
+		},
+		{
+			// In-range int64 that overflows when multiplied by time.Second
+			// (1<<40 s * 1e9 ns) wraps to a negative time.Duration. This must
+			// surface as a clean error from the AWS SDK presign guard, not a
+			// host panic or a silently-corrupt presigned URL (invariant 3).
+			name:   "presign_url expires_in overflows time.Duration",
+			script: mkClient + `c.presign_url("b", "k", expires_in=1099511627776)`,
+			want:   "duration must be 0 or greater",
+		},
+		{
+			name:   "client is unhashable",
+			script: mkClient + `d = {c: 1}`,
+			want:   "unhashable type: s3.Client",
+		},
+		{
+			name:   "client has no such attribute",
+			script: mkClient + `c.no_such_method`,
+			want:   "no .no_such_method attribute",
+		},
+		{
+			name:   "validate_bucket_name missing arg",
+			script: `load("s3", "validate_bucket_name")` + "\n" + `validate_bucket_name()`,
+			want:   "missing argument for name",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := runS3Script(t, c.script)
+			if err == nil {
+				t.Fatalf("expected an error containing %q, got nil", c.want)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), c.want)
+			}
+		})
+	}
+}
+
+// TestS3GetClientInfoNeverEchoesSecrets pins invariant 2: get_client_info
+// reports only *_set booleans for the host-injected credentials, never the
+// secret values themselves. Credentials are injected via S3_* env vars (signing
+// is offline; the values are never sent anywhere here).
+func TestS3GetClientInfoNeverEchoesSecrets(t *testing.T) {
+	const secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	t.Setenv("S3_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("S3_SECRET_KEY", secret)
+	t.Setenv("S3_SESSION_TOKEN", "tok-12345")
+
+	script := `
+load("s3", "create_client")
+
+def check():
+    info = create_client(service_type="aws").get_client_info()
+    # Presence is reported...
+    if not info.access_key_set:
+        fail("access_key_set should be True")
+    if not info.secret_key_set:
+        fail("secret_key_set should be True")
+    if not info.session_token_set:
+        fail("session_token_set should be True")
+    # ...but the struct must not carry the secret values at all.
+    if hasattr(info, "access_key"):
+        fail("info must not expose access_key")
+    if hasattr(info, "secret_key"):
+        fail("info must not expose secret_key")
+    if hasattr(info, "session_token"):
+        fail("info must not expose session_token")
+
+check()
+`
+	if err := runS3Script(t, script); err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+
+	// Belt and suspenders at the Go level: render the whole struct and confirm
+	// the secret value never appears in any field string.
+	cfg := &ClientConfig{ServiceType: ProviderAWS, Region: "us-east-1", SecretKey: secret, AccessKey: "AKIA", SessionToken: "tok"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("config validate: %v", err)
+	}
+	client, err := NewClient(nil, cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	cw := NewClientWrapper(client)
+	infoBuiltin, err := cw.Attr("get_client_info")
+	if err != nil {
+		t.Fatalf("Attr: %v", err)
+	}
+	builtin, ok := infoBuiltin.(*starlark.Builtin)
+	if !ok {
+		t.Fatalf("get_client_info is not a builtin: %T", infoBuiltin)
+	}
+	v, err := starlark.Call(&starlark.Thread{}, builtin, nil, nil)
+	if err != nil {
+		t.Fatalf("get_client_info call: %v", err)
+	}
+	if strings.Contains(v.String(), secret) {
+		t.Fatalf("get_client_info struct leaked the secret value: %s", v.String())
 	}
 }
 
