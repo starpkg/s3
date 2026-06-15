@@ -534,6 +534,15 @@ c = create_client(service_type="minio", endpoint="localhost:9000", use_ssl=False
 			want:   "out of range",
 		},
 		{
+			// In-range int64 that overflows when multiplied by time.Second
+			// (1<<40 s * 1e9 ns) wraps to a negative time.Duration. This must
+			// surface as a clean error from the AWS SDK presign guard, not a
+			// host panic or a silently-corrupt presigned URL (invariant 3).
+			name:   "presign_url expires_in overflows time.Duration",
+			script: mkClient + `c.presign_url("b", "k", expires_in=1099511627776)`,
+			want:   "duration must be 0 or greater",
+		},
+		{
 			name:   "client is unhashable",
 			script: mkClient + `d = {c: 1}`,
 			want:   "unhashable type: s3.Client",
