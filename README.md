@@ -196,15 +196,20 @@ that contain ASCII control characters (`0x00`–`0x0F`).
 
 ## Configuration
 
-All options are accepted as keyword arguments to `create_client(...)` and back
-the module's defaults.
+These are the module's config options and their defaults. The non-secret options
+are also accepted as keyword arguments to `create_client(...)` (a script-supplied
+value overrides the module default). The three **secret** options
+(`access_key` / `secret_key` / `session_token`) are **host-injected only** — they
+are *not* accepted as `create_client(...)` keyword arguments (passing them raises
+an `unexpected keyword argument` error); set them via the `S3_*` environment
+variables, the host config, or the AWS default credential chain (see [Safety](#safety)).
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `service_type` | `string` | `"auto"` | S3 service type (`aws`, `minio`, `cloudflare`, …); `"auto"` enables detection |
-| `access_key` | `string` | `""` | Access key ID (secret; host-injected only) |
-| `secret_key` | `string` | `""` | Secret access key (secret; host-injected only) |
-| `session_token` | `string` | `""` | Session token for temporary credentials (secret; host-injected only) |
+| `access_key` | `string` | `""` | Access key ID (secret; host-injected only, not a `create_client` kwarg) |
+| `secret_key` | `string` | `""` | Secret access key (secret; host-injected only, not a `create_client` kwarg) |
+| `session_token` | `string` | `""` | Session token for temporary credentials (secret; host-injected only, not a `create_client` kwarg) |
 | `region` | `string` | `"us-east-1"` | S3 region |
 | `endpoint` | `string` | `""` | Custom S3 endpoint URL |
 | `force_path_style` | `bool` | `false` | Force path-style addressing |
