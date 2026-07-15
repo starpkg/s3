@@ -3,17 +3,17 @@ module github.com/starpkg/s3
 go 1.21
 
 require (
-	github.com/1set/starlet v0.2.1
+	github.com/1set/starlet v0.2.3
 	github.com/aws/aws-sdk-go-v2 v1.32.6
 	github.com/aws/aws-sdk-go-v2/config v1.28.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.47
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.71.0
-	github.com/starpkg/base v0.1.0
+	github.com/starpkg/base v0.1.3
 	go.starlark.net v0.0.0-20260324133313-ffb3f39dd27a
 )
 
 require (
-	github.com/1set/starlight v0.2.0 // indirect
+	github.com/1set/starlight v0.2.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.9 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.25 // indirect

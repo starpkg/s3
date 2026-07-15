@@ -26,7 +26,8 @@ of gravity is the online service.
 - **Buckets and objects** — create / delete / list / inspect buckets; put / get
   / copy / delete / list objects, with metadata, tags, and content headers.
 - **Local-file helpers** — `put_object_file` / `get_object_file` upload from and
-  download to the local filesystem.
+  download to the local filesystem, **confined to the host-only `file_root`** (a
+  script can't read or write arbitrary host files; see *Configuration*).
 - **URLs** — public URLs from the client's config (`get_public_url`) and
   temporary pre-signed URLs (`presign_url`).
 - **Credentials are host-injected, never script-passed** — a script chooses the

@@ -600,6 +600,17 @@ environment variables, the host config, or the AWS default credential chain.
 `client.get_client_info()` reports only `access_key_set` / `secret_key_set` /
 `session_token_set` booleans, never the values.
 
+**Host-only file-access policy.** `file_root` and `allow_unsafe_file_paths` govern
+which local paths `put_object_file` / `get_object_file` may touch. They are
+**host-only**: only their getters (`get_file_root`, `get_allow_unsafe_file_paths`)
+are generated — **`set_file_root` and `set_allow_unsafe_file_paths` are
+intentionally NOT exposed**, so a script cannot widen its own filesystem reach.
+By default those two methods confine every local path under `file_root` (empty =
+the process working directory), rejecting any path that escapes it via `..` or a
+symlink; an "absolute" path is re-anchored under the root rather than reaching the
+real host path. `allow_unsafe_file_paths=true` is the host's explicit opt-out that
+disables the confinement.
+
 | Option | Getter | Setter | Type | Env var | Default | Description |
 |--------|--------|--------|------|---------|---------|-------------|
 | `service_type` | `get_service_type` | `set_service_type` | string | `S3_SERVICE_TYPE` | `"auto"` | S3 service type (`aws`, `minio`, `cloudflare`, …); `"auto"` enables detection |
@@ -616,6 +627,8 @@ environment variables, the host config, or the AWS default credential chain.
 | `concurrency` | `get_concurrency` | `set_concurrency` | int | `S3_CONCURRENCY` | `3` | Number of concurrent operations |
 | `enable_logging` | `get_enable_logging` | `set_enable_logging` | bool | `S3_ENABLE_LOGGING` | `false` | Enable debug logging |
 | `user_agent` | `get_user_agent` | `set_user_agent` | string | `S3_USER_AGENT` | `"Starlark-S3/1.0"` | Custom user agent string |
+| `file_root` | `get_file_root` | `set_file_root` — **host-only, not generated** | string | `S3_FILE_ROOT` | `""` | Root that `put_object_file`/`get_object_file` paths are confined under (`""` = working directory) |
+| `allow_unsafe_file_paths` | `get_allow_unsafe_file_paths` | `set_allow_unsafe_file_paths` — **host-only, not generated** | bool | `S3_ALLOW_UNSAFE_FILE_PATHS` | `false` | Disable the `file_root` confinement (host opt-out) |
 
 The env var for any option is `S3_` + the option name uppercased.
 

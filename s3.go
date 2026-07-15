@@ -4,12 +4,14 @@ package s3
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/1set/starlet"
 	"github.com/1set/starlet/dataconv"
 	"github.com/1set/starlet/dataconv/types"
 	"github.com/starpkg/base"
+	"github.com/starpkg/base/util"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 )
@@ -31,6 +33,11 @@ var (
 type Module struct {
 	cfgMod *base.ConfigurableModule
 	ext    *base.ConfigurableModuleExt
+	// fileRoot is the absolute local-file jail root, resolved ONCE at module
+	// construction (in Go, before any script runs) so a script cannot move it by
+	// changing the working directory before calling create_client. Empty means
+	// the root could not be resolved — file operations then fail closed.
+	fileRoot string
 }
 
 // NewModule creates a new instance of Module with default configurations
@@ -50,6 +57,15 @@ func NewModule() *Module {
 		genConfigOption(configKeyConcurrency, "Default number of concurrent operations", 3),
 		genConfigOption(configKeyEnableLogging, "Default enable debug logging", false),
 		genConfigOption(configKeyUserAgent, "Default user agent string", "Starlark-S3/1.0"),
+		// File-access policy for put_object_file / get_object_file. HOST-ONLY: a
+		// script must not be able to widen its own filesystem reach. file_root
+		// confines those paths ("" = the process working directory);
+		// allow_unsafe_file_paths (default false) is the explicit opt-out that
+		// disables the confinement — the host's decision, never the script's.
+		genConfigOption(configKeyFileRoot, "Root directory that put_object_file/get_object_file paths are confined under ('' = working directory)", "").
+			SetHostOnly(true),
+		genConfigOption(configKeyAllowUnsafeFilePaths, "Allow put_object_file/get_object_file to use paths outside file_root", false).
+			SetHostOnly(true),
 	)
 }
 
@@ -92,6 +108,8 @@ func newModuleWithOptions(
 	concurrencyOpt *base.ConfigOption[int],
 	enableLoggingOpt *base.ConfigOption[bool],
 	userAgentOpt *base.ConfigOption[string],
+	fileRootOpt *base.ConfigOption[string],
+	allowUnsafeFilePathsOpt *base.ConfigOption[bool],
 ) *Module {
 	cm, _ := base.NewConfigurableModuleWithConfigOptions(
 		serviceTypeOpt,
@@ -108,11 +126,18 @@ func newModuleWithOptions(
 		concurrencyOpt,
 		enableLoggingOpt,
 		userAgentOpt,
+		fileRootOpt,
+		allowUnsafeFilePathsOpt,
 	)
-	return &Module{
+	m := &Module{
 		cfgMod: cm,
 		ext:    cm.Extend(),
 	}
+	// Snapshot the file-access jail root now, in Go, before any script runs — so a
+	// script cannot chdir before create_client to widen the default (working-dir)
+	// jail. absFileRoot returns "" if the root can't be resolved (fail closed).
+	m.fileRoot = absFileRoot(m.ext.GetString(configKeyFileRoot))
+	return m
 }
 
 // LoadModule returns the Starlark module loader with S3-specific functions
@@ -209,8 +234,11 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 		return none, fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	// Create the wrapper and return it directly
+	// Create the wrapper and apply the host's file-access policy for
+	// put_object_file / get_object_file. m.fileRoot was resolved absolute at module
+	// construction (before any script ran), so it is immune to an in-script chdir.
 	wrapper := NewClientWrapper(client)
+	wrapper.setFileAccess(m.fileRoot, m.ext.GetBool(configKeyAllowUnsafeFilePaths))
 	return wrapper, nil
 }
 
@@ -241,12 +269,62 @@ type ClientWrapper struct {
 	client    *Client
 	methodMap map[string]func() starlark.Value
 	allNames  []string
+
+	// File-access policy for put_object_file / get_object_file (host-only).
+	fileRoot             string
+	allowUnsafeFilePaths bool
+}
+
+// setFileAccess records the host's file-access policy for put_object_file /
+// get_object_file. fileRoot must already be absolute (it is snapshotted at module
+// construction, before any script runs); it is stored as-is.
+func (s *ClientWrapper) setFileAccess(fileRoot string, allowUnsafeFilePaths bool) {
+	s.fileRoot = fileRoot
+	s.allowUnsafeFilePaths = allowUnsafeFilePaths
+}
+
+// absFileRoot resolves a configured file_root to an absolute path ONCE. An empty
+// root means the working directory. It returns "" if the path cannot be made
+// absolute (e.g. os.Getwd fails) — the caller then fails closed rather than
+// retaining a relative root that a later chdir could re-anchor.
+func absFileRoot(fileRoot string) string {
+	if fileRoot == "" {
+		fileRoot = "."
+	}
+	abs, err := filepath.Abs(fileRoot)
+	if err != nil {
+		return "" // fail closed
+	}
+	return abs
+}
+
+// resolveFilePath confines a script-supplied local file path to the host's
+// file_root (an absolute root snapshotted at module construction), rejecting any
+// path that escapes it (via `..` or a symlink) — so a script cannot read or write
+// arbitrary host files through put_object_file / get_object_file. It is bypassed
+// only when the host set allow_unsafe_file_paths; and it fails closed if the root
+// could not be resolved.
+func (s *ClientWrapper) resolveFilePath(p string) (string, error) {
+	if s.allowUnsafeFilePaths {
+		return p, nil
+	}
+	if s.fileRoot == "" || !filepath.IsAbs(s.fileRoot) {
+		return "", fmt.Errorf("file operations are disabled: no valid file_root")
+	}
+	resolved, err := util.ResolveUnder(s.fileRoot, p)
+	if err != nil {
+		return "", fmt.Errorf("file_path %q is outside the allowed root: %w", p, err)
+	}
+	return resolved, nil
 }
 
 // NewClientWrapper creates a new ClientWrapper with initialized method maps
 func NewClientWrapper(client *Client) *ClientWrapper {
 	cw := &ClientWrapper{
 		client: client,
+		// Secure default: confine local file paths to the working directory
+		// (snapshotted absolute) until the host applies its own policy.
+		fileRoot: absFileRoot(""),
 	}
 
 	// Initialize method map
@@ -540,8 +618,13 @@ func (s *ClientWrapper) putObjectFile(thread *starlark.Thread, b *starlark.Built
 		opts = option
 	}
 
+	safePath, err := s.resolveFilePath(filePath)
+	if err != nil {
+		return none, err
+	}
+
 	ctx := dataconv.GetThreadContext(thread)
-	err = s.client.PutObjectFromFile(ctx, bucket, key, filePath, opts)
+	err = s.client.PutObjectFromFile(ctx, bucket, key, safePath, opts)
 	if err != nil {
 		return none, fmt.Errorf("failed to put object from file: %w", err)
 	}
@@ -595,8 +678,13 @@ func (s *ClientWrapper) getObjectFile(thread *starlark.Thread, b *starlark.Built
 		return none, err
 	}
 
+	safePath, err := s.resolveFilePath(filePath)
+	if err != nil {
+		return none, err
+	}
+
 	ctx := dataconv.GetThreadContext(thread)
-	err := s.client.GetObjectToFile(ctx, bucket, key, filePath)
+	err = s.client.GetObjectToFile(ctx, bucket, key, safePath)
 	if err != nil {
 		return none, fmt.Errorf("failed to get object to file: %w", err)
 	}
