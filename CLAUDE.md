@@ -114,6 +114,25 @@ via `MarshalStarlark` / `dataconv.Marshal`.
 5. **Backward compatibility.** `NewModule()` and the default config values are the
    historical behavior; any new lever must default to it so existing scripts run
    identically.
+6. **Confined local file access (PKG-15).** `put_object_file` / `get_object_file`
+   are the only two operations that touch the local filesystem. Their
+   script-supplied `file_path` is routed through `ClientWrapper.resolveFilePath`
+   (`util.ResolveUnder`) **before** it reaches `os.Open` / `os.Create`, so a script
+   cannot read or write arbitrary host files — every path is confined under the
+   **host-only** `file_root` (empty = working directory), a `..`/symlink escape is
+   rejected, and an "absolute" path is re-anchored under the root. The confinement
+   is disabled only by the host-only `allow_unsafe_file_paths`. Keep both file ops
+   calling `resolveFilePath` first; both levers are host-only so a script can't
+   widen its own reach. The root is **snapshotted absolute at module construction**
+   (`NewModule` → `absFileRoot`, in Go before any script runs), so a script that
+   changes the process working directory (e.g. a `path.chdir` builtin) — whether
+   before or after `create_client` — cannot move the jail. If the root can't be
+   made absolute, `absFileRoot` returns `""` and `resolveFilePath` **fails closed**
+   (rejects every path) rather than falling back to a movable working-dir root.
+   Residuals (documented, not gaps in this module): `util.ResolveUnder` resolves
+   symlinks at check time while `os.Open`/`os.Create` follow them at use time, so a
+   root the host lets an attacker write to is TOCTOU-swappable — the host must own
+   the `file_root` tree.
 
 ## Test organization
 

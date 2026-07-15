@@ -13,20 +13,22 @@ import (
 
 // Configuration key constants
 const (
-	configKeyServiceType    = "service_type"
-	configKeyAccessKey      = "access_key"
-	configKeySecretKey      = "secret_key"
-	configKeySessionToken   = "session_token"
-	configKeyRegion         = "region"
-	configKeyEndpoint       = "endpoint"
-	configKeyForcePathStyle = "force_path_style"
-	configKeyUseSSL         = "use_ssl"
-	configKeyTimeout        = "timeout"
-	configKeyMaxRetries     = "max_retries"
-	configKeyPartSize       = "part_size"
-	configKeyConcurrency    = "concurrency"
-	configKeyEnableLogging  = "enable_logging"
-	configKeyUserAgent      = "user_agent"
+	configKeyServiceType          = "service_type"
+	configKeyAccessKey            = "access_key"
+	configKeySecretKey            = "secret_key"
+	configKeySessionToken         = "session_token"
+	configKeyRegion               = "region"
+	configKeyEndpoint             = "endpoint"
+	configKeyForcePathStyle       = "force_path_style"
+	configKeyUseSSL               = "use_ssl"
+	configKeyTimeout              = "timeout"
+	configKeyMaxRetries           = "max_retries"
+	configKeyPartSize             = "part_size"
+	configKeyConcurrency          = "concurrency"
+	configKeyEnableLogging        = "enable_logging"
+	configKeyUserAgent            = "user_agent"
+	configKeyFileRoot             = "file_root"
+	configKeyAllowUnsafeFilePaths = "allow_unsafe_file_paths"
 )
 
 // ClientConfig contains configuration for an S3 client

@@ -18,6 +18,8 @@ package s3
 //   - ClientWrapper Starlark-value protocol (Type/Truth/Hash/Freeze/Attr/String)
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -792,5 +794,85 @@ func TestClientWrapperProtocol(t *testing.T) {
 	}
 	if len(names) != len(want) {
 		t.Errorf("AttrNames count = %d, want %d", len(names), len(want))
+	}
+}
+
+// TestResolveFilePathSandbox verifies put_object_file / get_object_file paths are
+// confined to file_root: a script cannot read or write arbitrary host files. A
+// `..` escape is rejected; an "absolute" path is re-anchored UNDER the root
+// (never reaching the real host path); allow_unsafe_file_paths bypasses.
+func TestResolveFilePathSandbox(t *testing.T) {
+	root := t.TempDir()
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
+	cw := &ClientWrapper{fileRoot: root}
+
+	// Within the root: resolves under it.
+	got, err := cw.resolveFilePath("sub/data.bin")
+	if err != nil {
+		t.Fatalf("in-root path rejected: %v", err)
+	}
+	if !strings.HasPrefix(got, realRoot) {
+		t.Errorf("resolved %q should be under root %q", got, realRoot)
+	}
+
+	// A `..` escape must be rejected.
+	if _, err := cw.resolveFilePath("../../../etc/passwd"); err == nil {
+		t.Error("`..` escape must be rejected")
+	}
+
+	// An "absolute" path is re-anchored under root (not the real /etc/passwd).
+	abs, err := cw.resolveFilePath("/etc/passwd")
+	if err != nil {
+		t.Fatalf("absolute path should re-anchor under root, got error: %v", err)
+	}
+	if !strings.HasPrefix(abs, realRoot) || abs == "/etc/passwd" {
+		t.Errorf("absolute path must be confined under root, got %q", abs)
+	}
+
+	// The opt-out disables confinement.
+	cwUnsafe := &ClientWrapper{allowUnsafeFilePaths: true}
+	if p, err := cwUnsafe.resolveFilePath("/etc/passwd"); err != nil || p != "/etc/passwd" {
+		t.Errorf("allow_unsafe_file_paths should pass the path through, got (%q, %v)", p, err)
+	}
+
+	// An empty / unresolved file_root fails CLOSED — every path is rejected, so a
+	// misconfiguration can never silently fall back to a movable working-dir jail.
+	cwClosed := &ClientWrapper{}
+	if _, err := cwClosed.resolveFilePath("anything.txt"); err == nil {
+		t.Error("an empty file_root must fail closed (reject all paths)")
+	}
+}
+
+// TestFileRootSnapshotImmuneToChdir verifies the jail root is captured absolute at
+// module construction (in Go, before any script runs), so a script cannot move it
+// by changing the working directory — whether before or after create_client.
+func TestFileRootSnapshotImmuneToChdir(t *testing.T) {
+	m := NewModule()
+	snapshot := m.fileRoot
+	if !filepath.IsAbs(snapshot) {
+		t.Fatalf("module file_root should be absolute, got %q", snapshot)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	// The snapshot taken at NewModule must not follow a later chdir.
+	if m.fileRoot != snapshot {
+		t.Errorf("module file_root must not follow chdir: was %q, now %q", snapshot, m.fileRoot)
+	}
+	// A wrapper built from the snapshot confines under the pre-chdir root, not the
+	// new working directory.
+	cw := &ClientWrapper{}
+	cw.setFileAccess(m.fileRoot, false)
+	if !strings.HasPrefix(cw.fileRoot, snapshot) {
+		t.Errorf("wrapper root %q should be the pre-chdir snapshot %q", cw.fileRoot, snapshot)
 	}
 }
