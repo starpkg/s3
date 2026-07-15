@@ -52,12 +52,19 @@ keyword argument` error.
 - `endpoint` (string): Custom S3 endpoint URL.
 - `force_path_style` (bool): Force path-style addressing.
 - `use_ssl` (bool): Use SSL/TLS for connections.
-- `timeout` (int): Request timeout in seconds.
-- `max_retries` (int): Maximum retry attempts.
+- `timeout` (int): Per-request timeout in seconds; bounds each HTTP request to
+  the service.
+- `max_retries` (int): Maximum attempts per request, **including the first try**
+  (so `3` means up to two retries), default `3`. Passing `0` here means "use the
+  configured default" (like any unset numeric argument), so it resolves to `3` —
+  it does **not** mean zero retries. The effective value is always applied and
+  takes precedence over an ambient `AWS_MAX_ATTEMPTS`. To instead defer to the
+  SDK/env default, set the module option itself to `0` (`S3_MAX_RETRIES=0` or
+  `set_max_retries(0)`), which is left unset on the client.
 - `part_size` (int): Multipart upload part size in bytes.
 - `concurrency` (int): Number of concurrent operations.
-- `enable_logging` (bool): Enable debug logging.
-- `user_agent` (string): Custom user agent string.
+- `enable_logging` (bool): Enable SDK request/response logging.
+- `user_agent` (string): Custom user-agent token appended to the SDK user agent.
 
 **Returns:** A `Client` object (see [Client object](#client-object)).
 
@@ -634,8 +641,8 @@ misconfiguration and falls back to the default (fail-safe, never fail-open).
 | `endpoint` | `get_endpoint` | `set_endpoint` | string | `S3_ENDPOINT` | `""` | Custom S3 endpoint URL |
 | `force_path_style` | `get_force_path_style` | `set_force_path_style` | bool | `S3_FORCE_PATH_STYLE` | `false` | Force path-style addressing |
 | `use_ssl` | `get_use_ssl` | `set_use_ssl` | bool | `S3_USE_SSL` | `true` | Use SSL/TLS for connections |
-| `timeout` | `get_timeout` | `set_timeout` | int | `S3_TIMEOUT` | `30` | Request timeout in seconds |
-| `max_retries` | `get_max_retries` | `set_max_retries` | int | `S3_MAX_RETRIES` | `3` | Maximum retry attempts |
+| `timeout` | `get_timeout` | `set_timeout` | int | `S3_TIMEOUT` | `30` | Per-request timeout in seconds |
+| `max_retries` | `get_max_retries` | `set_max_retries` | int | `S3_MAX_RETRIES` | `3` | Maximum attempts per request, incl. the first try |
 | `part_size` | `get_part_size` | `set_part_size` | int | `S3_PART_SIZE` | `5242880` | Multipart upload part size in bytes (5 MiB) |
 | `concurrency` | `get_concurrency` | `set_concurrency` | int | `S3_CONCURRENCY` | `3` | Number of concurrent operations |
 | `enable_logging` | `get_enable_logging` | `set_enable_logging` | bool | `S3_ENABLE_LOGGING` | `false` | Enable debug logging |

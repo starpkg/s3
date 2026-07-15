@@ -47,8 +47,8 @@ type ClientConfig struct {
 	SessionToken string // Session token for temporary credentials
 
 	// Performance and reliability
-	Timeout     int   // Request timeout in seconds
-	MaxRetries  int   // Maximum retry attempts
+	Timeout     int   // Per-request timeout in seconds (bounds each HTTP request)
+	MaxRetries  int   // Maximum attempts per request, including the first try
 	PartSize    int64 // Multi-part upload part size in bytes
 	Concurrency int   // Concurrent operations
 

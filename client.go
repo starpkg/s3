@@ -11,11 +11,14 @@ import (
 
 	"github.com/1set/starlet/dataconv"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithymiddleware "github.com/aws/smithy-go/middleware"
 	startime "go.starlark.net/lib/time"
 	"go.starlark.net/starlark"
 )
@@ -163,6 +166,10 @@ func createAWSConfig(ctx context.Context, clientConfig *ClientConfig) (aws.Confi
 		opts = append(opts, config.WithCredentialsProvider(creds))
 	}
 
+	// Apply the client-behavior settings (timeout, retries, logging, user agent)
+	// so the configured values actually reach the SDK rather than being dropped.
+	opts = append(opts, clientBehaviorOptions(clientConfig)...)
+
 	// Load configuration
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
@@ -170,6 +177,80 @@ func createAWSConfig(ctx context.Context, clientConfig *ClientConfig) (aws.Confi
 	}
 
 	return cfg, nil
+}
+
+// clientBehaviorOptions maps the resolved timeout / max-retries / logging /
+// user-agent settings onto AWS config load options. Without this the SDK client
+// silently ignores those config values. Each lever is applied only when set, so
+// an unset value keeps the SDK default (the historical behavior).
+func clientBehaviorOptions(cc *ClientConfig) []func(*config.LoadOptions) error {
+	var opts []func(*config.LoadOptions) error
+
+	// Per-request timeout: a bounded HTTP client so a hung request can't block
+	// the caller forever. Capped so an absurd value can't overflow the
+	// nanosecond duration into a negative one, which http.Client would treat as
+	// "no deadline" and silently disable the bound.
+	if cc.Timeout > 0 {
+		opts = append(opts, config.WithHTTPClient(
+			awshttp.NewBuildableClient().WithTimeout(timeoutDuration(cc.Timeout))))
+	}
+
+	// Maximum attempts (including the first try; the SDK default is 3). A
+	// positive value takes precedence over any ambient AWS_MAX_ATTEMPTS; a
+	// non-positive value is skipped so the SDK/env default applies.
+	if cc.MaxRetries > 0 {
+		opts = append(opts, config.WithRetryMaxAttempts(cc.MaxRetries))
+	}
+
+	// Request/response logging when explicitly enabled.
+	if cc.EnableLogging {
+		opts = append(opts, config.WithClientLogMode(aws.LogRequest|aws.LogResponse))
+	}
+
+	// Custom user-agent token appended to the SDK's own user agent. A
+	// "name/version" string is added as a proper key/value pair; AddUserAgentKey
+	// alone would sanitize the '/' into '-' (turning "Starlark-S3/1.0" into
+	// "Starlark-S3-1.0").
+	if cc.UserAgent != "" {
+		opts = append(opts, config.WithAPIOptions([]func(*smithymiddleware.Stack) error{
+			userAgentOption(cc.UserAgent),
+		}))
+	}
+
+	return opts
+}
+
+// maxRequestTimeoutSeconds caps the per-request timeout at one day. Any positive
+// timeout is honored up to this bound; the cap only exists to keep the
+// nanosecond conversion from overflowing into a negative (unbounded) duration.
+const maxRequestTimeoutSeconds = 24 * 60 * 60
+
+// timeoutDuration converts a positive timeout in seconds to a duration, clamped
+// to maxRequestTimeoutSeconds so the conversion cannot overflow.
+func timeoutDuration(seconds int) time.Duration {
+	if seconds > maxRequestTimeoutSeconds {
+		seconds = maxRequestTimeoutSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// splitUserAgent decides how a configured user-agent string maps onto the SDK's
+// user-agent API: a "name/version" form is split so the '/' is preserved as a
+// key/value pair, while a bare string is a single key. Returned as a pure
+// decision so the routing is unit-testable without running a middleware stack.
+func splitUserAgent(ua string) (name, version string, pair bool) {
+	return strings.Cut(ua, "/")
+}
+
+// userAgentOption builds the user-agent middleware for a configured agent
+// string. A "name/version" form is registered as a key/value pair (so the '/'
+// survives; AddUserAgentKey alone would sanitize it to '-'); a bare string is
+// added as a single key.
+func userAgentOption(ua string) func(*smithymiddleware.Stack) error {
+	if name, version, pair := splitUserAgent(ua); pair {
+		return awsmiddleware.AddUserAgentKeyValue(name, version)
+	}
+	return awsmiddleware.AddUserAgentKey(ua)
 }
 
 // GetConfig returns the client configuration

@@ -18,6 +18,7 @@ package s3
 //   - ClientWrapper Starlark-value protocol (Type/Truth/Hash/Freeze/Attr/String)
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithymiddleware "github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"go.starlark.net/starlark"
 )
 
@@ -485,6 +488,101 @@ func TestConvertAWSObjectToObjectInfo(t *testing.T) {
 	}
 	if vid, _, _ := d.Get(starlark.String("version_id")); vid.(starlark.String).GoString() != "" {
 		t.Errorf("marshalled version_id = %v, want empty", vid)
+	}
+}
+
+func TestClientBehaviorOptionsWiring(t *testing.T) {
+	// Keep the retry assertions hermetic: an ambient AWS_MAX_ATTEMPTS would feed
+	// a non-zero value into aws.Config wherever we intentionally leave it unset.
+	t.Setenv("AWS_MAX_ATTEMPTS", "")
+	// The timeout / max-retries / logging / user-agent settings must actually
+	// reach the SDK config instead of being silently dropped.
+	cc := &ClientConfig{
+		Region:        "us-east-1",
+		Timeout:       7,
+		MaxRetries:    5,
+		EnableLogging: true,
+		UserAgent:     "Starlark-S3/test",
+	}
+	cfg, err := createAWSConfig(context.Background(), cc)
+	if err != nil {
+		t.Fatalf("createAWSConfig: %v", err)
+	}
+	if cfg.RetryMaxAttempts != 5 {
+		t.Errorf("RetryMaxAttempts = %d, want 5", cfg.RetryMaxAttempts)
+	}
+	if cfg.HTTPClient == nil {
+		t.Error("HTTPClient is nil — timeout was not applied")
+	}
+	if cfg.ClientLogMode&aws.LogRequest == 0 {
+		t.Errorf("ClientLogMode = %v, want LogRequest set", cfg.ClientLogMode)
+	}
+	if len(cfg.APIOptions) == 0 {
+		t.Error("APIOptions empty — user agent was not applied")
+	}
+
+	// With logging off and no custom user agent, those levers stay at the SDK
+	// default (no log mode, no extra API option) — an unset value must not
+	// change behavior.
+	base := &ClientConfig{Region: "us-east-1", Timeout: 30, MaxRetries: 3}
+	cfg2, err := createAWSConfig(context.Background(), base)
+	if err != nil {
+		t.Fatalf("createAWSConfig(base): %v", err)
+	}
+	if cfg2.ClientLogMode != 0 {
+		t.Errorf("ClientLogMode = %v, want 0 when logging disabled", cfg2.ClientLogMode)
+	}
+	if len(cfg2.APIOptions) != 0 {
+		t.Errorf("APIOptions = %d, want 0 when no custom user agent", len(cfg2.APIOptions))
+	}
+	if cfg2.RetryMaxAttempts != 3 {
+		t.Errorf("RetryMaxAttempts = %d, want 3 (default preserved)", cfg2.RetryMaxAttempts)
+	}
+	// max_retries=0 is skipped so the SDK/env default applies (not forced to 0).
+	cfg3, err := createAWSConfig(context.Background(), &ClientConfig{Region: "us-east-1", Timeout: 30, MaxRetries: 0})
+	if err != nil {
+		t.Fatalf("createAWSConfig(zero-retries): %v", err)
+	}
+	if cfg3.RetryMaxAttempts != 0 { // 0 == "unset" on aws.Config; SDK falls back to its default
+		t.Errorf("RetryMaxAttempts = %d, want 0 (unset -> SDK default) when max_retries=0", cfg3.RetryMaxAttempts)
+	}
+}
+
+func TestTimeoutDuration(t *testing.T) {
+	if got := timeoutDuration(7); got != 7*time.Second {
+		t.Errorf("timeoutDuration(7) = %v, want 7s", got)
+	}
+	// A value far above the cap must clamp to it and stay POSITIVE (a negative
+	// duration would disable the bound). 1<<30 seconds is well past the cap yet
+	// still fits a 32-bit int, so the test compiles on every target.
+	big := timeoutDuration(1 << 30)
+	if big <= 0 {
+		t.Errorf("timeoutDuration(big) = %v, must stay positive", big)
+	}
+	if big != maxRequestTimeoutSeconds*time.Second {
+		t.Errorf("timeoutDuration(big) = %v, want cap %v", big, maxRequestTimeoutSeconds*time.Second)
+	}
+}
+
+func TestSplitUserAgent(t *testing.T) {
+	// The routing decision this module owns: a "name/version" form must be
+	// recognized as a pair (so it goes through AddUserAgentKeyValue and keeps its
+	// '/'), while a bare string is a single key. Asserting the decision — not
+	// just that the middleware installs — means reverting to the old
+	// AddUserAgentKey(ua) path would fail this test.
+	name, version, pair := splitUserAgent("Starlark-S3/1.0")
+	if !pair || name != "Starlark-S3" || version != "1.0" {
+		t.Errorf("splitUserAgent(slash) = (%q, %q, %v), want (Starlark-S3, 1.0, true)", name, version, pair)
+	}
+	if _, _, pair := splitUserAgent("PlainAgent"); pair {
+		t.Error("splitUserAgent(bare) reported a pair, want single key")
+	}
+	// Both forms must also install onto a real middleware stack without error.
+	for _, ua := range []string{"Starlark-S3/1.0", "PlainAgent"} {
+		stack := smithymiddleware.NewStack("test", smithyhttp.NewStackRequest)
+		if err := userAgentOption(ua)(stack); err != nil {
+			t.Errorf("userAgentOption(%q) apply error: %v", ua, err)
+		}
 	}
 }
 
