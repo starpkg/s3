@@ -133,6 +133,11 @@ via `MarshalStarlark` / `dataconv.Marshal`.
    symlinks at check time while `os.Open`/`os.Create` follow them at use time, so a
    root the host lets an attacker write to is TOCTOU-swappable — the host must own
    the `file_root` tree.
+7. **Bounded in-memory read.** `get_object` reads the whole object into a Starlark
+   string, so it routes through `util.ReadAllLimited(reader, maxObjectSize)` — the
+   host-only `max_object_size` (default 256 MiB, `0` = unlimited) caps it so a huge
+   object can't exhaust host memory. (`get_object_file` streams to disk via
+   `io.Copy`, so it is not an in-memory concern; its path is jailed by invariant 6.)
 
 ## Test organization
 

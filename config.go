@@ -29,6 +29,7 @@ const (
 	configKeyUserAgent            = "user_agent"
 	configKeyFileRoot             = "file_root"
 	configKeyAllowUnsafeFilePaths = "allow_unsafe_file_paths"
+	configKeyMaxObjectSize        = "max_object_size"
 )
 
 // ClientConfig contains configuration for an S3 client
