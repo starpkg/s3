@@ -876,3 +876,75 @@ func TestFileRootSnapshotImmuneToChdir(t *testing.T) {
 		t.Errorf("wrapper root %q should be the pre-chdir snapshot %q", cw.fileRoot, snapshot)
 	}
 }
+
+// TestS3HostOnlyOptions verifies the DoS/safety levers cannot be changed from a
+// script: no set_<key> builtin is generated for the host-only options, while the
+// getters (and a normal option's setter) remain.
+func TestS3HostOnlyOptions(t *testing.T) {
+	dict, err := NewModule().LoadModule()()
+	if err != nil {
+		t.Fatalf("LoadModule: %v", err)
+	}
+	mod, ok := dict[ModuleName].(starlark.HasAttrs)
+	if !ok {
+		t.Fatalf("module %q is not attr-accessible: %T", ModuleName, dict[ModuleName])
+	}
+	attrs := make(map[string]bool)
+	for _, n := range mod.AttrNames() {
+		attrs[n] = true
+	}
+	for _, absent := range []string{"set_file_root", "set_allow_unsafe_file_paths", "set_max_object_size"} {
+		if attrs[absent] {
+			t.Errorf("%s must not be script-settable (host-only)", absent)
+		}
+	}
+	for _, present := range []string{"get_file_root", "get_allow_unsafe_file_paths", "get_max_object_size", "set_region"} {
+		if !attrs[present] {
+			t.Errorf("%s builtin should be present", present)
+		}
+	}
+}
+
+// TestMaxObjectSizeWiring verifies max_object_size reaches the wrapper get_object
+// reads from — via create_client — and honors the env override.
+func TestMaxObjectSizeWiring(t *testing.T) {
+	newWrapper := func(t *testing.T) *ClientWrapper {
+		t.Helper()
+		m := NewModule()
+		b := starlark.NewBuiltin("s3.create_client", m.starCreateClient)
+		v, err := m.starCreateClient(&starlark.Thread{}, b, nil, nil)
+		if err != nil {
+			t.Fatalf("create_client: %v", err)
+		}
+		cw, ok := v.(*ClientWrapper)
+		if !ok {
+			t.Fatalf("create_client returned %T, want *ClientWrapper", v)
+		}
+		return cw
+	}
+
+	if got := newWrapper(t).maxObjectSize; got != defaultMaxObjectSize {
+		t.Errorf("default wrapper max_object_size = %d, want %d", got, defaultMaxObjectSize)
+	}
+
+	t.Setenv("S3_MAX_OBJECT_SIZE", "1048576")
+	if got := newWrapper(t).maxObjectSize; got != 1048576 {
+		t.Errorf("env wrapper max_object_size = %d, want 1048576", got)
+	}
+}
+
+// TestResolveMaxObjectSize verifies the fail-safe clamp: 0 stays unlimited
+// (explicit), a positive value is honored, and a negative value (misconfiguration)
+// falls back to the default rather than silently disabling the cap.
+func TestResolveMaxObjectSize(t *testing.T) {
+	cases := map[int]int{
+		0:    0,                    // explicit unlimited
+		1024: 1024,                 // honored
+		-1:   defaultMaxObjectSize, // fail safe, not fail open
+	}
+	for in, want := range cases {
+		if got := resolveMaxObjectSize(in); got != want {
+			t.Errorf("resolveMaxObjectSize(%d) = %d, want %d", in, got, want)
+		}
+	}
+}

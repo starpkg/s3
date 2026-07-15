@@ -105,6 +105,9 @@ Top-level builtins (`load("s3", …)`):
 - `set_object_info(bucket, key, **options)` — set object metadata/properties in place.
 - `copy_object(src_bucket, src_key, dst_bucket, dst_key, **options)` — copy an object.
 
+`get_object` reads at most `max_object_size` bytes into memory (host-only, 256 MiB
+default) so a huge object can't exhaust host memory.
+
 The object-writing methods (`put_object`, `put_object_file`, `set_object_info`,
 `copy_object`) accept the optional keyword arguments `content_type`, `metadata`,
 `tags`, `cache_control`, `content_disposition`, `content_encoding`,

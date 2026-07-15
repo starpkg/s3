@@ -3,7 +3,6 @@ package s3
 
 import (
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 
@@ -18,6 +17,20 @@ import (
 
 // ModuleName defines the expected name for this module when used in Starlark's load() function
 const ModuleName = "s3"
+
+// defaultMaxObjectSize caps how many bytes get_object reads into memory (256 MiB).
+const defaultMaxObjectSize = 256 * 1024 * 1024
+
+// resolveMaxObjectSize maps a configured max_object_size to the effective cap: 0
+// means unlimited (explicit), but a NEGATIVE value is a misconfiguration that must
+// fail SAFE — it falls back to the default rather than silently disabling the
+// guard (fail-open).
+func resolveMaxObjectSize(configured int) int {
+	if configured < 0 {
+		return defaultMaxObjectSize
+	}
+	return configured
+}
 
 var (
 	none = starlark.None
@@ -66,6 +79,11 @@ func NewModule() *Module {
 			SetHostOnly(true),
 		genConfigOption(configKeyAllowUnsafeFilePaths, "Allow put_object_file/get_object_file to use paths outside file_root", false).
 			SetHostOnly(true),
+		// max_object_size bounds how much get_object reads into memory, so a
+		// hostile/huge object can't exhaust host memory. HOST-ONLY (a DoS guard a
+		// script must not be able to raise); 0 = unlimited. Default 256 MiB.
+		genConfigOption(configKeyMaxObjectSize, "Maximum bytes get_object reads into memory (0 = unlimited)", defaultMaxObjectSize).
+			SetHostOnly(true),
 	)
 }
 
@@ -110,6 +128,7 @@ func newModuleWithOptions(
 	userAgentOpt *base.ConfigOption[string],
 	fileRootOpt *base.ConfigOption[string],
 	allowUnsafeFilePathsOpt *base.ConfigOption[bool],
+	maxObjectSizeOpt *base.ConfigOption[int],
 ) *Module {
 	cm, _ := base.NewConfigurableModuleWithConfigOptions(
 		serviceTypeOpt,
@@ -128,6 +147,7 @@ func newModuleWithOptions(
 		userAgentOpt,
 		fileRootOpt,
 		allowUnsafeFilePathsOpt,
+		maxObjectSizeOpt,
 	)
 	m := &Module{
 		cfgMod: cm,
@@ -239,6 +259,7 @@ func (m *Module) starCreateClient(thread *starlark.Thread, b *starlark.Builtin, 
 	// construction (before any script ran), so it is immune to an in-script chdir.
 	wrapper := NewClientWrapper(client)
 	wrapper.setFileAccess(m.fileRoot, m.ext.GetBool(configKeyAllowUnsafeFilePaths))
+	wrapper.maxObjectSize = resolveMaxObjectSize(m.ext.GetInt(configKeyMaxObjectSize))
 	return wrapper, nil
 }
 
@@ -273,6 +294,8 @@ type ClientWrapper struct {
 	// File-access policy for put_object_file / get_object_file (host-only).
 	fileRoot             string
 	allowUnsafeFilePaths bool
+	// maxObjectSize bounds get_object's in-memory read (host-only; 0 = unlimited).
+	maxObjectSize int
 }
 
 // setFileAccess records the host's file-access policy for put_object_file /
@@ -654,7 +677,8 @@ func (s *ClientWrapper) getObject(thread *starlark.Thread, b *starlark.Builtin, 
 	defer reader.Close()
 
 	// Read all content
-	content, err := io.ReadAll(reader)
+	// Bound the in-memory read so a huge object can't exhaust host memory.
+	content, err := util.ReadAllLimited(reader, int64(s.maxObjectSize))
 	if err != nil {
 		return none, fmt.Errorf("failed to read object content: %w", err)
 	}
