@@ -238,7 +238,10 @@ client.create_bucket("eu-bucket", region="eu-west-1")
 ### `client.delete_bucket(bucket, force=False)`
 
 Deletes a bucket. With `force=True`, all of the bucket's objects are deleted
-first.
+first. If any object cannot be deleted (object lock, governance, permissions),
+the call fails with an error naming the first failure rather than reporting a
+false success — the bucket is left intact so the condition is not silently
+swallowed.
 
 **Parameters:**
 
@@ -456,8 +459,12 @@ Returns object metadata.
 
 **Returns:** `dict` with the fields `key`, `size`, `last_modified`, `etag`,
 `content_type`, `content_encoding`, `content_disposition`, `content_language`,
-`cache_control`, `expires`, `storage_class`, `version_id`, `is_latest`,
-`owner`, `metadata`, `tags`.
+`cache_control`, `expires`, `storage_class`, `checksum_algorithm`, `version_id`,
+`is_latest`, `owner`, `metadata`, `tags`. For `list_objects` entries
+`checksum_algorithm` carries the object's checksum algorithm (e.g. `"SHA256"`)
+when present; `version_id` there is empty because a plain object listing carries
+no version — it is populated only where the API returns one (e.g.
+`get_object_info`).
 
 **Example:**
 
