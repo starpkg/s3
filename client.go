@@ -53,10 +53,12 @@ func convertAWSObjectToObjectInfo(obj types.Object) ObjectInfo {
 		Owner:        getOwnerDisplayName(obj.Owner),
 	}
 
-	// Handle checksum algorithms if present
+	// Report the object's checksum algorithm as its own field. (A ListObjectsV2
+	// entry carries no VersionId — that comes only from ListObjectVersions — so
+	// version_id is deliberately left empty here rather than being overwritten
+	// with the checksum algorithm.)
 	if len(obj.ChecksumAlgorithm) > 0 {
-		// Store the first checksum algorithm as a string representation
-		objInfo.VersionID = string(obj.ChecksumAlgorithm[0])
+		objInfo.ChecksumAlgorithm = string(obj.ChecksumAlgorithm[0])
 	}
 
 	return objInfo
@@ -733,13 +735,35 @@ func (c *Client) deleteAllObjects(ctx context.Context, bucket string) error {
 			},
 		}
 
-		_, err = c.client.DeleteObjects(ctx, deleteInput)
+		output, err := c.client.DeleteObjects(ctx, deleteInput)
 		if err != nil {
 			return fmt.Errorf("failed to delete objects: %w", err)
+		}
+
+		// DeleteObjects returns HTTP 200 even when individual objects fail
+		// (object lock, governance, permissions), reporting them in .Errors
+		// rather than as a request error. Surfacing them here keeps a force
+		// delete honest: without this, the batch call "succeeds" while objects
+		// remain and the subsequent DeleteBucket fails with "bucket not empty".
+		if err := deleteObjectsPartialError(output.Errors); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// deleteObjectsPartialError turns the per-object failures of a DeleteObjects
+// batch (returned in the response body alongside HTTP 200) into an error, so a
+// partially-failed force delete is reported as a failure rather than a success.
+// It returns nil when no objects failed.
+func deleteObjectsPartialError(errs []types.Error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	first := errs[0]
+	return fmt.Errorf("failed to delete %d object(s), first: key %q: %s: %s",
+		len(errs), aws.ToString(first.Key), aws.ToString(first.Code), aws.ToString(first.Message))
 }
 
 // BucketInfo contains comprehensive information about an S3 bucket
@@ -802,6 +826,7 @@ type ObjectInfo struct {
 	CacheControl       string            `json:"cache_control,omitempty"`
 	Expires            *time.Time        `json:"expires,omitempty"`
 	StorageClass       string            `json:"storage_class,omitempty"`
+	ChecksumAlgorithm  string            `json:"checksum_algorithm,omitempty"`
 	VersionID          string            `json:"version_id,omitempty"`
 	IsLatest           bool              `json:"is_latest,omitempty"`
 	Owner              string            `json:"owner,omitempty"`
@@ -811,7 +836,7 @@ type ObjectInfo struct {
 
 // MarshalStarlark implements the Marshaler interface for ObjectInfo
 func (o *ObjectInfo) MarshalStarlark() (starlark.Value, error) {
-	dict := starlark.NewDict(16)
+	dict := starlark.NewDict(17)
 
 	dict.SetKey(starlark.String("key"), starlark.String(o.Key))
 	dict.SetKey(starlark.String("size"), starlark.MakeInt64(o.Size))
@@ -831,6 +856,7 @@ func (o *ObjectInfo) MarshalStarlark() (starlark.Value, error) {
 	}
 
 	dict.SetKey(starlark.String("storage_class"), starlark.String(o.StorageClass))
+	dict.SetKey(starlark.String("checksum_algorithm"), starlark.String(o.ChecksumAlgorithm))
 	dict.SetKey(starlark.String("version_id"), starlark.String(o.VersionID))
 	dict.SetKey(starlark.String("is_latest"), starlark.Bool(o.IsLatest))
 	dict.SetKey(starlark.String("owner"), starlark.String(o.Owner))

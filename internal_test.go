@@ -461,14 +461,52 @@ func TestConvertAWSObjectToObjectInfo(t *testing.T) {
 	if got.StorageClass != "STANDARD" {
 		t.Errorf("StorageClass = %q", got.StorageClass)
 	}
-	// First checksum algorithm is recorded in VersionID (current behavior).
-	if got.VersionID != "SHA256" {
-		t.Errorf("VersionID = %q, want SHA256", got.VersionID)
+	// The checksum algorithm is reported in its own field, not smuggled into
+	// version_id. A ListObjectsV2 entry has no VersionId, so it stays empty.
+	if got.ChecksumAlgorithm != "SHA256" {
+		t.Errorf("ChecksumAlgorithm = %q, want SHA256", got.ChecksumAlgorithm)
 	}
-	// No checksum -> empty VersionID, no panic on nil pointers.
+	if got.VersionID != "" {
+		t.Errorf("VersionID = %q, want empty (ListObjectsV2 carries no version)", got.VersionID)
+	}
+	// No checksum -> empty ChecksumAlgorithm/VersionID, no panic on nil pointers.
 	plain := convertAWSObjectToObjectInfo(awstypes.Object{})
-	if plain.VersionID != "" || plain.Key != "" {
+	if plain.ChecksumAlgorithm != "" || plain.VersionID != "" || plain.Key != "" {
 		t.Errorf("plain = %+v", plain)
+	}
+	// The marshalled dict exposes both fields distinctly.
+	v, err := got.MarshalStarlark()
+	if err != nil {
+		t.Fatalf("MarshalStarlark: %v", err)
+	}
+	d := v.(*starlark.Dict)
+	if ca, _, _ := d.Get(starlark.String("checksum_algorithm")); ca.(starlark.String).GoString() != "SHA256" {
+		t.Errorf("marshalled checksum_algorithm = %v", ca)
+	}
+	if vid, _, _ := d.Get(starlark.String("version_id")); vid.(starlark.String).GoString() != "" {
+		t.Errorf("marshalled version_id = %v, want empty", vid)
+	}
+}
+
+func TestDeleteObjectsPartialError(t *testing.T) {
+	// No per-object failures -> no error (the batch fully succeeded).
+	if err := deleteObjectsPartialError(nil); err != nil {
+		t.Errorf("empty errors should be nil, got %v", err)
+	}
+	// Any per-object failure must surface as an error naming the first one and
+	// the total count, so a force delete does not falsely report success.
+	errs := []awstypes.Error{
+		{Key: aws.String("locked.txt"), Code: aws.String("AccessDenied"), Message: aws.String("object is locked")},
+		{Key: aws.String("other.txt"), Code: aws.String("InternalError"), Message: aws.String("try again")},
+	}
+	err := deleteObjectsPartialError(errs)
+	if err == nil {
+		t.Fatal("per-object failures must produce an error")
+	}
+	for _, want := range []string{"2 object", "locked.txt", "AccessDenied", "object is locked"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 
