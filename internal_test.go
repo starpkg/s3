@@ -586,6 +586,168 @@ func TestSplitUserAgent(t *testing.T) {
 	}
 }
 
+func TestListMaxTotal(t *testing.T) {
+	mk := func(n int) *ListObjectsOptions { return &ListObjectsOptions{MaxKeys: &n} }
+	cases := []struct {
+		name string
+		opts *ListObjectsOptions
+		want int
+	}{
+		{"nil defaults to 1000", nil, 1000},
+		{"zero defaults to 1000", mk(0), 1000},
+		{"negative defaults to 1000", mk(-5), 1000},
+		{"positive honored", mk(250), 250},
+		{"large honored", mk(5000), 5000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := listMaxTotal(tc.opts); got != tc.want {
+				t.Errorf("listMaxTotal = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// fakeListAPI serves canned ListObjectsV2 responses in order, recording the
+// MaxKeys requested per call and optionally failing on a given call.
+type fakeListAPI struct {
+	pages          []*awss3.ListObjectsV2Output
+	errAt          int // 1-based call index to fail on; 0 = never
+	calls          int
+	requestedMax   []int32
+	requestedToken []string
+}
+
+func (f *fakeListAPI) ListObjectsV2(_ context.Context, in *awss3.ListObjectsV2Input, _ ...func(*awss3.Options)) (*awss3.ListObjectsV2Output, error) {
+	f.calls++
+	f.requestedMax = append(f.requestedMax, aws.ToInt32(in.MaxKeys))
+	f.requestedToken = append(f.requestedToken, aws.ToString(in.ContinuationToken))
+	if f.errAt == f.calls {
+		return nil, context.DeadlineExceeded
+	}
+	return f.pages[f.calls-1], nil
+}
+
+func fullPage(n int, truncated bool, token string) *awss3.ListObjectsV2Output {
+	out := &awss3.ListObjectsV2Output{IsTruncated: aws.Bool(truncated)}
+	if token != "" {
+		t := token
+		out.NextContinuationToken = &t
+	}
+	for i := 0; i < n; i++ {
+		key := "k"
+		out.Contents = append(out.Contents, awstypes.Object{Key: &key})
+	}
+	return out
+}
+
+func objPage(truncated bool, token string, keys ...string) *awss3.ListObjectsV2Output {
+	out := &awss3.ListObjectsV2Output{IsTruncated: aws.Bool(truncated)}
+	if token != "" {
+		t := token
+		out.NextContinuationToken = &t
+	}
+	for _, k := range keys {
+		key := k
+		out.Contents = append(out.Contents, awstypes.Object{Key: &key})
+	}
+	return out
+}
+
+func TestPaginateListObjects(t *testing.T) {
+	bg := context.Background()
+
+	// Single non-truncated page: all objects, not truncated, no token.
+	api := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(false, "", "a", "b")}}
+	objs, _, tok, trunc, err := paginateListObjects(bg, api, &awss3.ListObjectsV2Input{}, 1000)
+	if err != nil || len(objs) != 2 || trunc || tok != "" {
+		t.Fatalf("single page: objs=%d trunc=%v tok=%q err=%v", len(objs), trunc, tok, err)
+	}
+
+	// Two pages concatenate; the second (non-truncated) ends it.
+	api2 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(true, "t1", "a", "b"), objPage(false, "", "c")}}
+	objs2, _, tok2, trunc2, _ := paginateListObjects(bg, api2, &awss3.ListObjectsV2Input{}, 1000)
+	if len(objs2) != 3 || trunc2 || tok2 != "" || api2.calls != 2 {
+		t.Errorf("two pages: objs=%d trunc=%v tok=%q calls=%d", len(objs2), trunc2, tok2, api2.calls)
+	}
+
+	// Budget cap stops paging: max_keys=2 with a truncated first page returns 2,
+	// truncated=true, the page's token, and no second call. The per-page request
+	// asks for exactly the budget (no overshoot).
+	api3 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(true, "t1", "a", "b"), objPage(false, "", "c")}}
+	objs3, _, tok3, trunc3, _ := paginateListObjects(bg, api3, &awss3.ListObjectsV2Input{}, 2)
+	if len(objs3) != 2 || !trunc3 || tok3 != "t1" || api3.calls != 1 {
+		t.Errorf("cap: objs=%d trunc=%v tok=%q calls=%d", len(objs3), trunc3, tok3, api3.calls)
+	}
+	if len(api3.requestedMax) != 1 || api3.requestedMax[0] != 2 {
+		t.Errorf("requested MaxKeys = %v, want [2] (exact budget, no overshoot)", api3.requestedMax)
+	}
+
+	// Delimiter/common-prefix pages count toward the cap (regression guard): a
+	// page of 2 prefixes and 0 objects with max_keys=2 must stop after one call,
+	// not fetch unboundedly.
+	pref1, pref2 := "a/", "b/"
+	prefixPage := &awss3.ListObjectsV2Output{
+		IsTruncated:    aws.Bool(true),
+		CommonPrefixes: []awstypes.CommonPrefix{{Prefix: &pref1}, {Prefix: &pref2}},
+	}
+	prefTok := "more"
+	prefixPage.NextContinuationToken = &prefTok
+	api4 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{prefixPage, objPage(true, "x", "z")}}
+	objs4, prefixes4, _, trunc4, _ := paginateListObjects(bg, api4, &awss3.ListObjectsV2Input{}, 2)
+	if len(objs4) != 0 || len(prefixes4) != 2 || !trunc4 || api4.calls != 1 {
+		t.Errorf("prefix cap: objs=%d prefixes=%d trunc=%v calls=%d (must stop after 1)", len(objs4), len(prefixes4), trunc4, api4.calls)
+	}
+
+	// Per-page request is bounded by the S3 maximum even for a huge max_keys.
+	api5 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(false, "", "a")}}
+	paginateListObjects(bg, api5, &awss3.ListObjectsV2Input{}, 100000)
+	if api5.requestedMax[0] != s3MaxKeysPerPage {
+		t.Errorf("requested MaxKeys = %d, want capped at %d", api5.requestedMax[0], s3MaxKeysPerPage)
+	}
+
+	// An error propagates.
+	api6 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(true, "t", "a")}, errAt: 1}
+	if _, _, _, _, err := paginateListObjects(bg, api6, &awss3.ListObjectsV2Input{}, 1000); err == nil {
+		t.Error("expected error from failing call")
+	}
+
+	// Multi-page budget arithmetic + token forwarding: max_keys=1002 over a full
+	// 1000-item first page (truncated) then a 2-item page. The second request
+	// must ask for exactly the remaining 2 and carry the first page's token.
+	api7 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{fullPage(1000, true, "next-1"), objPage(false, "", "y", "z")}}
+	objs7, _, tok7, trunc7, _ := paginateListObjects(bg, api7, &awss3.ListObjectsV2Input{}, 1002)
+	if len(objs7) != 1002 || trunc7 || tok7 != "" || api7.calls != 2 {
+		t.Errorf("multi-page: objs=%d trunc=%v tok=%q calls=%d", len(objs7), trunc7, tok7, api7.calls)
+	}
+	if len(api7.requestedMax) != 2 || api7.requestedMax[0] != 1000 || api7.requestedMax[1] != 2 {
+		t.Errorf("requestedMax = %v, want [1000 2]", api7.requestedMax)
+	}
+	if len(api7.requestedToken) != 2 || api7.requestedToken[0] != "" || api7.requestedToken[1] != "next-1" {
+		t.Errorf("requestedToken = %v, want [\"\" next-1]", api7.requestedToken)
+	}
+
+	// A caller-supplied starting cursor must be used on the first request, not
+	// silently dropped.
+	api8 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(false, "", "a")}}
+	start := "resume-here"
+	paginateListObjects(bg, api8, &awss3.ListObjectsV2Input{ContinuationToken: &start}, 1000)
+	if api8.requestedToken[0] != "resume-here" {
+		t.Errorf("first request token = %q, want resume-here (initial cursor honored)", api8.requestedToken[0])
+	}
+
+	// Non-progress guard: a truncated page whose continuation token does not
+	// advance (empty here) must stop rather than spin forever.
+	api9 := &fakeListAPI{pages: []*awss3.ListObjectsV2Output{objPage(true, "", "a"), objPage(true, "", "b")}}
+	objs9, _, _, trunc9, _ := paginateListObjects(bg, api9, &awss3.ListObjectsV2Input{}, 1000)
+	if api9.calls != 1 {
+		t.Errorf("non-progress: made %d calls, want 1 (must not spin)", api9.calls)
+	}
+	if len(objs9) != 1 || !trunc9 {
+		t.Errorf("non-progress: objs=%d trunc=%v, want 1 object + truncated", len(objs9), trunc9)
+	}
+}
+
 func TestDeleteObjectsPartialError(t *testing.T) {
 	// No per-object failures -> no error (the batch fully succeeded).
 	if err := deleteObjectsPartialError(nil); err != nil {

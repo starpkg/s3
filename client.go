@@ -580,31 +580,105 @@ func (c *Client) ListObjects(ctx context.Context, bucket string, opts *ListObjec
 		opts.ApplyToListObjects(input)
 	}
 
-	result, err := c.client.ListObjectsV2(ctx, input)
+	// max_keys bounds the total number of items returned across pages (default
+	// 1000, the historical single-page size). S3 returns at most 1000 items per
+	// request, so a larger total is auto-paginated instead of being silently
+	// clamped to one page. Memory use is bounded by the caller's max_keys.
+	maxTotal := listMaxTotal(opts)
+	objects, commonPrefixes, nextToken, truncated, err := paginateListObjects(ctx, c.client, input, maxTotal)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list objects in bucket %s: %w", bucket, err)
-	}
-
-	// Convert to our result format
-	objects := make([]ObjectInfo, len(result.Contents))
-	for i, obj := range result.Contents {
-		objects[i] = convertAWSObjectToObjectInfo(obj)
-	}
-
-	commonPrefixes := make([]string, len(result.CommonPrefixes))
-	for i, prefix := range result.CommonPrefixes {
-		commonPrefixes[i] = aws.ToString(prefix.Prefix)
 	}
 
 	return &ListObjectsResult{
 		Contents:       objects,
 		CommonPrefixes: commonPrefixes,
-		IsTruncated:    aws.ToBool(result.IsTruncated),
-		NextMarker:     aws.ToString(result.NextContinuationToken),
-		MaxKeys:        int(aws.ToInt32(result.MaxKeys)),
-		Prefix:         aws.ToString(result.Prefix),
-		Delimiter:      aws.ToString(result.Delimiter),
+		IsTruncated:    truncated,
+		NextMarker:     nextToken,
+		MaxKeys:        maxTotal,
+		Prefix:         aws.ToString(input.Prefix),
+		Delimiter:      aws.ToString(input.Delimiter),
 	}, nil
+}
+
+// s3MaxKeysPerPage is the maximum number of items S3 returns in a single
+// ListObjectsV2 page.
+const s3MaxKeysPerPage = 1000
+
+// listMaxTotal returns the total number of items (objects plus grouped common
+// prefixes) a listing should return across auto-paginated pages. max_keys
+// (default 1000) bounds it; S3 counts objects and common prefixes together
+// against MaxKeys, so the loop must bound on their sum, not objects alone.
+func listMaxTotal(opts *ListObjectsOptions) int {
+	if opts != nil && opts.MaxKeys != nil && *opts.MaxKeys > 0 {
+		return *opts.MaxKeys
+	}
+	return 1000
+}
+
+// listObjectsV2API is the one S3 call paginateListObjects makes; *s3.Client
+// satisfies it, and a fake exercises the paging loop in tests without a live
+// client.
+type listObjectsV2API interface {
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+}
+
+// paginateListObjects lists objects (and common prefixes) across pages, never
+// requesting or keeping more than maxTotal items combined. Each page requests
+// exactly the remaining budget (bounded by the S3 per-page maximum), so a page
+// can never overshoot the cap — which means the returned nextToken always
+// resumes precisely after the returned set, and a delimiter listing that yields
+// mostly common prefixes is still bounded (S3 counts prefixes against MaxKeys,
+// and so does this loop). truncated is true when more items remain beyond the
+// returned set.
+func paginateListObjects(ctx context.Context, api listObjectsV2API, input *s3.ListObjectsV2Input, maxTotal int) (objects []ObjectInfo, commonPrefixes []string, nextToken string, truncated bool, err error) {
+	// Honor a caller-supplied starting cursor (opts may set one) rather than
+	// silently restarting from the beginning.
+	token := input.ContinuationToken
+	for len(objects)+len(commonPrefixes) < maxTotal {
+		pageLimit := maxTotal - (len(objects) + len(commonPrefixes))
+		if pageLimit > s3MaxKeysPerPage {
+			pageLimit = s3MaxKeysPerPage
+		}
+		input.MaxKeys = aws.Int32(int32(pageLimit))
+		input.ContinuationToken = token
+
+		out, perr := api.ListObjectsV2(ctx, input)
+		if perr != nil {
+			return nil, nil, "", false, perr
+		}
+		for _, obj := range out.Contents {
+			objects = append(objects, convertAWSObjectToObjectInfo(obj))
+		}
+		for _, prefix := range out.CommonPrefixes {
+			commonPrefixes = append(commonPrefixes, aws.ToString(prefix.Prefix))
+		}
+
+		next, keepGoing := advanceToken(out, token)
+		if !keepGoing {
+			return objects, commonPrefixes, aws.ToString(next), aws.ToBool(out.IsTruncated), nil
+		}
+		token = next
+	}
+	// Stopped with the budget full while S3 still has more: the token resumes
+	// exactly after the returned set because no page overshot.
+	return objects, commonPrefixes, aws.ToString(token), true, nil
+}
+
+// advanceToken decides the cursor to resume from after a page and whether paging
+// should continue. It stops (keepGoing=false) when the page was the last one
+// (not truncated) or when the cursor fails to advance — an empty or unchanged
+// continuation token on a truncated page, which would otherwise spin forever
+// against a misbehaving endpoint.
+func advanceToken(out *s3.ListObjectsV2Output, current *string) (next *string, keepGoing bool) {
+	if !aws.ToBool(out.IsTruncated) {
+		return nil, false
+	}
+	n := out.NextContinuationToken
+	if aws.ToString(n) == "" || aws.ToString(n) == aws.ToString(current) {
+		return n, false
+	}
+	return n, true
 }
 
 // ObjectExists checks if an object exists in S3

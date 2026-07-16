@@ -426,9 +426,19 @@ a result envelope).
 - `bucket` (string): Bucket name.
 - `prefix` (string): Only return keys beginning with this prefix (default: all).
 - `delimiter` (string): Group keys by this delimiter (default: none).
-- `max_keys` (int): Maximum number of keys to return (default: `1000`).
+- `max_keys` (int): Maximum number of items to return **in total** (default:
+  `1000`). S3 returns at most 1000 items per request, so a larger `max_keys` is
+  satisfied by transparently paginating and concatenating pages until the total
+  is reached — you are not silently capped at one page. Memory use is bounded by
+  `max_keys`, so raise it deliberately for very large buckets. When a `delimiter`
+  is set, grouped common prefixes count toward this total alongside objects (S3
+  counts them together).
 
 **Returns:** `list[dict]` — one dict per object (the object-info fields below).
+
+> **Note:** the flat list carries objects only. When `delimiter` is set, the
+> grouped `common_prefixes` (the pseudo-folders) are **not** returned by this
+> method; list without a delimiter to enumerate the keys themselves.
 
 **Example:**
 
