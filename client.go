@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	smithymiddleware "github.com/aws/smithy-go/middleware"
 	startime "go.starlark.net/lib/time"
 	"go.starlark.net/starlark"
@@ -319,6 +321,30 @@ func (c *Client) ListBuckets(ctx context.Context) ([]BucketInfo, error) {
 	return buckets, nil
 }
 
+// isNotFoundErr reports whether err is an S3 "does not exist" error, matched by
+// the SDK's typed errors and the API error code rather than by substring —
+// substring matching is locale/version fragile and can false-match an unrelated
+// message. It recognizes the object and bucket not-found shapes across S3-
+// compatible providers (which may surface the code without the AWS typed error).
+func isNotFoundErr(err error) bool {
+	var (
+		notFound     *types.NotFound
+		noSuchKey    *types.NoSuchKey
+		noSuchBucket *types.NoSuchBucket
+	)
+	if errors.As(err, &notFound) || errors.As(err, &noSuchKey) || errors.As(err, &noSuchBucket) {
+		return true
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NotFound", "NoSuchKey", "NoSuchBucket", "404":
+			return true
+		}
+	}
+	return false
+}
+
 // BucketExists checks if a bucket exists
 func (c *Client) BucketExists(ctx context.Context, bucket string) (bool, error) {
 	input := &s3.HeadBucketInput{
@@ -327,8 +353,7 @@ func (c *Client) BucketExists(ctx context.Context, bucket string) (bool, error) 
 
 	_, err := c.client.HeadBucket(ctx, input)
 	if err != nil {
-		// Check if it's a "not found" error
-		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchBucket") {
+		if isNotFoundErr(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check bucket existence: %w", err)
@@ -690,8 +715,7 @@ func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, er
 
 	_, err := c.client.HeadObject(ctx, input)
 	if err != nil {
-		// Check if it's a "not found" error
-		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchKey") {
+		if isNotFoundErr(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check object existence: %w", err)
