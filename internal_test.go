@@ -19,6 +19,8 @@ package s3
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +30,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	smithymiddleware "github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"go.starlark.net/starlark"
@@ -745,6 +748,35 @@ func TestPaginateListObjects(t *testing.T) {
 	}
 	if len(objs9) != 1 || !trunc9 {
 		t.Errorf("non-progress: objs=%d trunc=%v, want 1 object + truncated", len(objs9), trunc9)
+	}
+}
+
+func TestIsNotFoundErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil is not a not-found", nil, false},
+		{"typed NotFound", &awstypes.NotFound{}, true},
+		{"typed NoSuchKey", &awstypes.NoSuchKey{}, true},
+		{"typed NoSuchBucket", &awstypes.NoSuchBucket{}, true},
+		{"wrapped typed error unwraps", fmt.Errorf("head failed: %w", &awstypes.NoSuchKey{}), true},
+		{"api error code NoSuchKey", &smithy.GenericAPIError{Code: "NoSuchKey"}, true},
+		{"api error code 404", &smithy.GenericAPIError{Code: "404"}, true},
+		{"api error code NoSuchBucket", &smithy.GenericAPIError{Code: "NoSuchBucket"}, true},
+		{"unrelated api error is not not-found", &smithy.GenericAPIError{Code: "AccessDenied"}, false},
+		// The whole point of the change: a plain error whose text merely
+		// contains "NotFound" must NOT be treated as not-found (the old
+		// strings.Contains would have false-matched this).
+		{"substring in unrelated message does not match", errors.New("timeout while reading NotFound.txt"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNotFoundErr(tc.err); got != tc.want {
+				t.Errorf("isNotFoundErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 
