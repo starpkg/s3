@@ -59,14 +59,8 @@ jobs:
           test "$actual_go" = 'go version go1.21.13 linux/amd64'
           go list -m -json all > "$RUNNER_TEMP/s3-baseline/modules.json"
           python3 - <<'PYGUARD'
-          import hashlib, json, os, pathlib, subprocess, urllib.request
+          import hashlib, json, os, pathlib, subprocess
           sha = os.environ["BASELINE_SHA"]
-          request = urllib.request.Request("https://api.github.com/repos/starpkg/s3/pulls/20", headers={"Accept": "application/vnd.github+json", "User-Agent": "s3-baseline-provenance"})
-          with urllib.request.urlopen(request, timeout=15) as response:
-              pr = json.load(response)
-          assert pr["base"]["ref"] == "master" and pr["base"]["sha"] == sha
-          assert pr["head"]["ref"] == "codex/ci-contract-adoption-20261107"
-          assert pr["head"]["sha"] == os.environ["GITHUB_SHA"]
           paths = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
           paths = [p for p in paths if p.endswith(".go") or pathlib.PurePosixPath(p).name in ("go.mod", "go.sum")]
           hashes = {}
@@ -80,6 +74,21 @@ jobs:
                     "upload_branch": "master", "upload_pr": None, "source_sha256": hashes}
           pathlib.Path(os.environ["RUNNER_TEMP"], "s3-baseline", "source-manifest.json").write_text(json.dumps(record, indent=2) + "\n")
           PYGUARD
+      - name: Verify live PR metadata before baseline execution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYPR'
+          import json, os, urllib.request
+          request = urllib.request.Request("https://api.github.com/repos/starpkg/s3/pulls/20", headers={"Accept": "application/vnd.github+json", "User-Agent": "s3-baseline-provenance", "Authorization": "Bearer " + os.environ["GH_TOKEN"]})
+          with urllib.request.urlopen(request, timeout=15) as response:
+              pr = json.load(response)
+          assert pr["base"]["ref"] == "master" and pr["base"]["sha"] == os.environ["BASELINE_SHA"]
+          assert pr["head"]["ref"] == "codex/ci-contract-adoption-20261107"
+          assert pr["head"]["sha"] == os.environ["GITHUB_SHA"]
+          PYPR
       - name: Build, test twice with race coverage, and vet the baseline
         shell: bash
         run: |
@@ -91,7 +100,7 @@ jobs:
           test -z "$(git ls-files --others --exclude-standard)"
           test -s "$RUNNER_TEMP/s3-baseline/coverage.out"
           python3 - <<'PYVERIFY'
-          import hashlib, json, os, pathlib, urllib.request
+          import hashlib, json, os, pathlib
           root = pathlib.Path(os.environ["RUNNER_TEMP"], "s3-baseline")
           expected = json.loads((root / "source-manifest.json").read_text())["source_sha256"]
           assert all(hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() == h for p, h in expected.items())
@@ -102,14 +111,24 @@ jobs:
           covered = sum(int(statements) for _, statements, hits in blocks if int(hits) > 0)
           assert total > 0 and covered / total * 100 >= 51  # Existing caller cov-min.
           (root / "profile-metrics.json").write_text(json.dumps({"covered_statements": covered, "statements": total, "coverage_percent": covered / total * 100, "existing_cov_min": 51}, indent=2) + "\n")
-          request = urllib.request.Request("https://api.github.com/repos/starpkg/s3/pulls/20", headers={"Accept": "application/vnd.github+json", "User-Agent": "s3-baseline-provenance"})
+          PYVERIFY
+      - name: Verify live PR metadata before baseline upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYPR'
+          import json, os, urllib.request
+          request = urllib.request.Request("https://api.github.com/repos/starpkg/s3/pulls/20", headers={"Accept": "application/vnd.github+json", "User-Agent": "s3-baseline-provenance", "Authorization": "Bearer " + os.environ["GH_TOKEN"]})
           with urllib.request.urlopen(request, timeout=15) as response:
               pr = json.load(response)
           assert pr["base"]["ref"] == "master" and pr["base"]["sha"] == os.environ["BASELINE_SHA"]
+          assert pr["head"]["ref"] == "codex/ci-contract-adoption-20261107"
           assert pr["head"]["sha"] == os.environ["GITHUB_SHA"]
-          PYVERIFY
+          PYPR
       - name: Upload the real master profile using a scoped GitHub OIDC identity
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
         with:
           use_oidc: true
           files: ${{ runner.temp }}/s3-baseline/coverage.out
