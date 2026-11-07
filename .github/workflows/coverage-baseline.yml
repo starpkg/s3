@@ -1,0 +1,129 @@
+name: Coverage baseline
+
+on:
+  push:
+    branches: ["codex/ci-contract-adoption-20261107"]
+    paths: [".github/workflows/coverage-baseline.yml"]
+
+permissions: {}
+
+jobs:
+  exact-master-baseline:
+    if: github.repository == 'starpkg/s3' && github.event_name == 'push' && github.ref == 'refs/heads/codex/ci-contract-adoption-20261107'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      BASELINE_SHA: df32a63b581a8b85237a34646e5d3ee276bbdfb6
+      BASELINE_TREE: a762a656af71919d325555889dc2e5333a41213a
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=2 -mod=readonly"
+      GOTOOLCHAIN: local
+      GOWORK: "off"
+      AWS_EC2_METADATA_DISABLED: "true"
+      S3_RUN_INTEGRATION: ""
+    steps:
+      - name: Check out the actual master baseline
+        uses: actions/checkout@v5
+        with:
+          ref: df32a63b581a8b85237a34646e5d3ee276bbdfb6
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up the existing Go floor
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.21.13"
+          cache-dependency-path: go.sum
+      - name: Verify source identity and event context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test -z "${GITHUB_HEAD_REF:-}"
+          test "$(git rev-parse HEAD)" = "$BASELINE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$BASELINE_TREE"
+          master_sha=$(git ls-remote https://github.com/starpkg/s3.git refs/heads/master | cut -f1)
+          test "$master_sha" = "$BASELINE_SHA"
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          printf '%s  %s\n' \
+            a5d4d4eaec8edf36a519b55b10d29e96eb01df9b2595eb720f070e135703b94d go.mod \
+            1c39d4507d580613d111fdcc1c978e2bce1458217d692252906d19a67ef0b625 go.sum | sha256sum --check -
+          test "$(go list -m -f '{{.GoVersion}}')" = 1.21
+          test "$(go list -m -f '{{.Version}}' go.starlark.net)" = v0.0.0-20260324133313-ffb3f39dd27a
+          mkdir -p "$RUNNER_TEMP/s3-baseline"
+          actual_go=$(go version)
+          printf '%s\n' "$actual_go" | tee "$RUNNER_TEMP/s3-baseline/go-version.txt"
+          test "$actual_go" = 'go version go1.21.13 linux/amd64'
+          go list -m -json all > "$RUNNER_TEMP/s3-baseline/modules.json"
+          python3 - <<'PYGUARD'
+          import hashlib, json, os, pathlib, subprocess, urllib.request
+          sha = os.environ["BASELINE_SHA"]
+          request = urllib.request.Request("https://api.github.com/repos/starpkg/s3/pulls/20", headers={"Accept": "application/vnd.github+json", "User-Agent": "s3-baseline-provenance"})
+          with urllib.request.urlopen(request, timeout=15) as response:
+              pr = json.load(response)
+          assert pr["base"]["ref"] == "master" and pr["base"]["sha"] == sha
+          assert pr["head"]["ref"] == "codex/ci-contract-adoption-20261107"
+          assert pr["head"]["sha"] == os.environ["GITHUB_SHA"]
+          paths = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          paths = [p for p in paths if p.endswith(".go") or pathlib.PurePosixPath(p).name in ("go.mod", "go.sum")]
+          hashes = {}
+          for path in paths:
+              expected = subprocess.check_output(["git", "show", sha + ":" + path])
+              actual = pathlib.Path(path).read_bytes()
+              assert actual == expected, path
+              hashes[path] = hashlib.sha256(actual).hexdigest()
+          record = {"tested_source_sha": sha, "tested_tree": os.environ["BASELINE_TREE"],
+                    "workflow_driver_sha": os.environ["GITHUB_SHA"], "event": os.environ["GITHUB_EVENT_NAME"],
+                    "upload_branch": "master", "upload_pr": None, "source_sha256": hashes}
+          pathlib.Path(os.environ["RUNNER_TEMP"], "s3-baseline", "source-manifest.json").write_text(json.dumps(record, indent=2) + "\n")
+          PYGUARD
+      - name: Build, test twice with race coverage, and vet the baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build ./...
+          go test -race -count=2 -timeout=5m -covermode=atomic -coverprofile="$RUNNER_TEMP/s3-baseline/coverage.out" ./...
+          go vet ./...
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          test -s "$RUNNER_TEMP/s3-baseline/coverage.out"
+          python3 - <<'PYVERIFY'
+          import hashlib, json, os, pathlib, urllib.request
+          root = pathlib.Path(os.environ["RUNNER_TEMP"], "s3-baseline")
+          expected = json.loads((root / "source-manifest.json").read_text())["source_sha256"]
+          assert all(hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() == h for p, h in expected.items())
+          lines = (root / "coverage.out").read_text().splitlines()
+          assert lines[0] == "mode: atomic" and len(lines) > 1
+          blocks = [line.rsplit(" ", 2) for line in lines[1:]]
+          total = sum(int(statements) for _, statements, _ in blocks)
+          covered = sum(int(statements) for _, statements, hits in blocks if int(hits) > 0)
+          assert total > 0 and covered / total * 100 >= 51  # Existing caller cov-min.
+          (root / "profile-metrics.json").write_text(json.dumps({"covered_statements": covered, "statements": total, "coverage_percent": covered / total * 100, "existing_cov_min": 51}, indent=2) + "\n")
+          request = urllib.request.Request("https://api.github.com/repos/starpkg/s3/pulls/20", headers={"Accept": "application/vnd.github+json", "User-Agent": "s3-baseline-provenance"})
+          with urllib.request.urlopen(request, timeout=15) as response:
+              pr = json.load(response)
+          assert pr["base"]["ref"] == "master" and pr["base"]["sha"] == os.environ["BASELINE_SHA"]
+          assert pr["head"]["sha"] == os.environ["GITHUB_SHA"]
+          PYVERIFY
+      - name: Upload the real master profile using a scoped GitHub OIDC identity
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ${{ runner.temp }}/s3-baseline/coverage.out
+          disable_search: true
+          root_dir: ${{ github.workspace }}
+          override_commit: df32a63b581a8b85237a34646e5d3ee276bbdfb6
+          override_branch: master
+          name: exact-master-df32a63-floor1.21
+          fail_ci_if_error: true
+      - name: Preserve baseline provenance and the actual profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-exact-master-baseline-${{ github.run_id }}
+          path: ${{ runner.temp }}/s3-baseline/
+          if-no-files-found: warn
+          retention-days: 14
