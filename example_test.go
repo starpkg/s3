@@ -1,6 +1,12 @@
 package s3
 
+// Script-level sections:
+//   - module/client configuration and public client information
+//   - offline validation, argument errors, and credential boundaries
+//   - explicitly opt-in live endpoint fixtures
+
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -90,6 +96,83 @@ test_client_creation()
 	_, err := runner.Run()
 	if err != nil {
 		t.Fatalf("Script execution failed: %v", err)
+	}
+}
+
+// TestS3PartSizeConfiguration checks that module configuration survives client
+// creation. No operation is sent to S3: the getters are metadata-only public
+// builtins. The ordinary default and explicit override are controls for the
+// host/module configured-value regressions.
+func TestS3PartSizeConfiguration(t *testing.T) {
+	cases := []struct {
+		name        string
+		env         string
+		hostValue   int64
+		moduleValue int64
+		override    int64
+		wantModule  int64
+		wantClient  int64
+	}{
+		{name: "default", wantModule: 5 * 1024 * 1024, wantClient: 5 * 1024 * 1024},
+		{name: "host_environment", env: "8388608", wantModule: 8 * 1024 * 1024, wantClient: 8 * 1024 * 1024},
+		{name: "wide_host_environment", env: "3221225472", wantModule: 3 * 1024 * 1024 * 1024, wantClient: 3 * 1024 * 1024 * 1024},
+		{name: "host_typed_setter", hostValue: 9 * 1024 * 1024, wantModule: 9 * 1024 * 1024, wantClient: 9 * 1024 * 1024},
+		{name: "module_setter", env: "8388608", moduleValue: 12 * 1024 * 1024, wantModule: 12 * 1024 * 1024, wantClient: 12 * 1024 * 1024},
+		{name: "explicit_override", env: "8388608", override: 16 * 1024 * 1024, wantModule: 8 * 1024 * 1024, wantClient: 16 * 1024 * 1024},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Known host-only credentials and disabled metadata/config files keep
+			// SDK configuration local. The script performs no object operation.
+			t.Setenv("S3_PART_SIZE", tc.env)
+			t.Setenv("S3_ACCESS_KEY", "test-access-key")
+			t.Setenv("S3_SECRET_KEY", "test-secret-key")
+			t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+			t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/absent-config")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/absent-credentials")
+			module := NewModule()
+			if tc.hostValue != 0 {
+				if err := base.SetConfigValue[int64](module.cfgMod, configKeyPartSize, tc.hostValue); err != nil {
+					t.Fatalf("host typed setter: %v", err)
+				}
+			}
+			setter := ""
+			if tc.moduleValue != 0 {
+				setter = fmt.Sprintf("    set_part_size(%d)\n", tc.moduleValue)
+			}
+			override := ""
+			if tc.override != 0 {
+				override = fmt.Sprintf(", part_size=%d", tc.override)
+			}
+			script := fmt.Sprintf(`
+load("s3", "create_client", "get_part_size", "set_part_size")
+def check():
+%s
+    if get_part_size() != %d:
+        fail("module part_size getter did not preserve the configured int64 value")
+    client = create_client(service_type="aws"%s)
+    actual = client.get_client_info().part_size
+    if actual != %d:
+        fail("client part_size = %%d; expected %%d" %% (actual, %d))
+check()
+`, setter, tc.wantModule, override, tc.wantClient, tc.wantClient)
+			runner := starlet.NewDefault()
+			runner.SetLazyloadModules(map[string]starlet.ModuleLoader{ModuleName: module.LoadModule()})
+			runner.SetScriptContent([]byte(script))
+			_, runErr := runner.Run()
+			// Independent base public API controls prove that stored configuration
+			// is correct even when client construction consumes the wrong type.
+			value, err := base.GetConfigValue[int64](module.cfgMod, configKeyPartSize)
+			if err != nil || value != tc.wantModule {
+				t.Errorf("base typed getter = %d, %v; want %d", value, err, tc.wantModule)
+			}
+			if got := module.cfgMod.ListConfigs()[configKeyPartSize]["value"]; got != tc.wantModule {
+				t.Errorf("ListConfigs part_size = %#v, want %d", got, tc.wantModule)
+			}
+			if runErr != nil {
+				t.Errorf("public client configuration: %v", runErr)
+			}
+		})
 	}
 }
 
