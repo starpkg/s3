@@ -84,6 +84,8 @@ Top-level builtins (`load("s3", …)`):
 - `validate_object_key(key)` — whether `key` is a valid S3 object key.
 - `get_supported_services()` — the list of supported service-type strings.
 
+`part_size` and `concurrency` are retained in client configuration and reported by `get_client_info()`. Current uploads use single-request SDK operations; these settings do not enable multipart or concurrent transfers.
+
 `Client` object methods (returned by `create_client`):
 
 - `get_client_info()` — effective config struct (secret values reported only as `*_set` booleans).
