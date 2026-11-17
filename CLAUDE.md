@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`starpkg/s3` is an **L4 domain module** of the Star\* ecosystem: it exposes
+`starpkg/s3` is an **L3 domain module** of the Star\* ecosystem: it exposes
 S3-compatible object storage to Starlark scripts. A script loads the module,
 creates a client, and performs bucket/object operations with Go data marshalled
 to and from Starlark values.
@@ -172,7 +172,7 @@ Three layers must stay in sync (enforced by the doc standard,
 
 - **Floor = go 1.21**, raised under an ENG-SEP because the pinned AWS SDK for Go
   v2 requires it; the floor only rises in its own dedicated PR.
-- **CI matrix** = `[1.21.x, 1.25.x]` via the centralized reusable workflow in
+- **CI matrix** = `[1.21.x, 1.27.x]` via the centralized reusable workflow in
   `1set/meta` (`.github/workflows/build.yml`, pinned to a commit SHA;
   `doc-coverage: true` runs the `doccov` gate).
 - **Bumping the version, the go floor, or tagging are user-confirmed actions** —
